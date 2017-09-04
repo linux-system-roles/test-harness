@@ -5,6 +5,7 @@ RUN dnf install -y \
   genisoimage \
   openssh-clients \
   python2-avocado \
+  python2-avocado-plugins-varianter-yaml-to-mux \
   qemu-system-x86
 
 RUN useradd -m tester
