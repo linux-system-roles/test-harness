@@ -1,22 +1,22 @@
-FROM fedora:25
+FROM fedora:26
 
 RUN dnf install -y \
-  ansible \
-  genisoimage \
-  openssh-clients \
-  python2-avocado \
-  qemu-system-x86
+    ansible \
+    git \
+    python3-requests \
+    standard-test-roles
 
 RUN useradd -m tester
 USER tester
 
-VOLUME /cache /role
+COPY test /test
 
-COPY . /system-api-test
-COPY avocado.conf /etc/avocado
+# Copied from standard-test-roles with larskarlitski's patches:
+# - don't hang when not connected to a tty
+# - use the raw module instead of ping to contact a host
+COPY standard-inventory-qcow2 /usr/share/ansible/inventory/
 
-# NOTE can be removed once avocado handles its cache configuration correctly
-RUN mkdir -p /home/tester/avocado/data/cache
+VOLUME /config /secrets /cache
 
-WORKDIR /system-api-test
-CMD avocado run test.py -m image:images.yml --show-job-log
+WORKDIR /home/tester
+ENTRYPOINT ["/test/run-tests"]

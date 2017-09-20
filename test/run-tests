@@ -1,0 +1,377 @@
+#!/usr/bin/python3 -u
+
+import datetime
+import glob
+import json
+import logging
+import os
+import random
+import requests
+import shlex
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import traceback
+import urllib.parse
+import urllib.request
+
+hostname = socket.gethostname()
+
+
+class Session(requests.Session):
+    """
+    A small extension for requests.Session that saves typing the host, calls
+    raise_for_status() on responses by default, and allows specifying a default
+    timeout.
+    """
+
+    def __init__(self, host, timeout=10):
+        super().__init__()
+        self.host = host
+        self.timeout = timeout
+
+    def post(self, path, json, check=True):
+        r = super().post(f'{self.host}/{path}', json=json, timeout=self.timeout)
+        if check:
+            r.raise_for_status()
+        return r
+
+    def get(self, path, check=True):
+        r = super().get(f'{self.host}/{path}', timeout=self.timeout)
+        if check:
+            r.raise_for_status()
+        return r
+
+
+class redirect_output:
+    """
+    A context manager that redirects stdout and stderr to a file.
+    """
+
+    def __init__(self, filename):
+        self.filename = filename
+
+    def __enter__(self):
+        self.f = open(self.filename, 'w', buffering=1)
+        sys.stdout.flush()
+        sys.stderr.flush()
+
+        self.oldout = sys.stdout
+        self.olderr = sys.stderr
+
+        sys.stdout = self.f
+        sys.stderr = self.f
+
+        return self.f
+
+    def __exit__(self, *exception):
+        self.f.close()
+
+        sys.stdout = self.oldout
+        sys.stderr = self.olderr
+
+
+def run(*argv, env=None, check=True):
+    """
+    Small wrapper around subprocess.run(), which prints the command to be
+    executed and raises an exception by default.
+    """
+    print('+ ' + ' '.join(shlex.quote(a) for a in argv))
+    return subprocess.run(argv, env=env, check=check, stdout=sys.stdout, stderr=sys.stderr)
+
+
+def fetch_image(url, cache):
+    """
+    Fetches an image from @url into @cache, if a file with the same name
+    doesn't yet exist. There is no need for fancier caching, as image names are
+    unique enough.
+
+    Returns the full path to the image.
+    """
+
+    fn = os.path.basename(urllib.parse.urlparse(url).path)
+    path = os.path.join(cache, fn)
+
+    if not os.path.exists(path):
+        print(f'Fetch {url}')
+
+        f = tempfile.NamedTemporaryFile(dir=cache, delete=False)
+        try:
+            request = urllib.request.urlopen(url)
+            shutil.copyfileobj(request, f)
+            request.close()
+        except:
+            logging.warning(traceback.format_exc())
+            os.unlink(f.name)
+            return None
+
+        os.rename(f.name, path)
+    else:
+        print(f'Use cached {fn}')
+
+    return path
+
+
+class checkout_repository:
+    """
+    A context manager that shallowly checks out a github repository into a
+    temporary directory.
+    """
+
+    def __init__(self, owner, repo, refspec):
+        self.url = f'https://github.com/{owner}/{repo}'
+        self.refspec = refspec
+
+    def __enter__(self):
+        self.dir = tempfile.TemporaryDirectory()
+
+        run('git', 'init', '--quiet', self.dir.name)
+        run('git', '-C', self.dir.name, 'fetch', '--quiet',
+                                                 '--depth=1',
+                                                 self.url,
+                                                 self.refspec, env={ 'GIT_TERMINAL_PROMPT': '0' })
+        run('git', '-C', self.dir.name, 'checkout', '--quiet', 'FETCH_HEAD')
+
+        return self.dir.name
+
+    def __exit__(self, *exception):
+        self.dir.cleanup()
+
+
+class Task:
+    """
+    A task represents a single unit of work: test a specific pull request of a
+    repository against an OS image.
+    """
+
+    def __init__(self, owner, repo, pull, head, image):
+        self.owner = owner
+        self.repo = repo
+        self.pull = pull
+        self.head = head
+        self.image = image
+        self.id = f'pull-{self.pull}-{self.head[:7]}-' + self.image['name']
+
+    def run(self, artifactsdir, cachedir):
+        """
+        Runs the task and puts results into @artifactsdir. Returns True if all
+        tests succeeded.
+        """
+        image_path = fetch_image(self.image['source'], cachedir)
+        if not image_path:
+            return False
+
+        with checkout_repository(self.owner, self.repo, f'pull/{self.pull}/head') as sourcedir:
+            playbooks = []
+
+            # Generate a playbook with a single raw task to setup the image
+            # (this usually means installing python2 on the guest for ansible)
+            if 'setup' in self.image:
+                setup_file = os.path.join(sourcedir, '_setup.yml')
+                play = {
+                    'name': 'Setup', 'hosts': 'all', 'become': True, 'gather_facts': False,
+                    'tasks': [
+                        { 'raw': self.image['setup'] }
+                    ]
+                }
+                with open(setup_file, 'w') as f:
+                    json.dump([play], f)
+
+                playbooks.append(setup_file)
+
+            # Fedora's standard test invocation spec mandates a
+            # `tests/tests.yml`, but linux-system-roles used to be tested by
+            # running all playbooks `test/test_*.yml`. Support both, but prefer
+            # the standard way. Can be removed once all repos are moved over.
+            if os.path.exists(f'{sourcedir}/tests/tests.yml'):
+                playbooks.append(f'{sourcedir}/tests/tests.yml')
+            else:
+                playbooks.extend(glob.glob(f'{sourcedir}/test/test_*.yml'))
+
+            for playbook in playbooks:
+                # Use the qcow2 inventory from standard-test-roles, which boots
+                # a transient VM and runs the playbook against that. Create a
+                # fresh instance for each test playbook. However, we do need to
+                # run the setup (if it exists) in the same invocation of
+                # ansible-playbook, so that that it applies to the same VM as
+                # the test playbook.
+                r = run('ansible-playbook', '-vv',
+                        '--inventory=/usr/share/ansible/inventory/standard-inventory-qcow2',
+                        *playbooks,
+                        env={ 'TEST_SUBJECTS': image_path, 'TEST_ARTIFACTS': artifactsdir },
+                        check=False)
+
+                if r.returncode != 0:
+                    return False
+
+            return True
+
+
+def pull_ok_to_test(gh, owner, repo, pull, author):
+    """
+    Returns True if we trust the pull request enough to run its code. It must
+    either come from a collaborator of the repository (a github user with push
+    access) or be marked with the "needs-ci" tag by a collaborator.
+    """
+
+    r = gh.get(f'repos/{owner}/{repo}/collaborators/{author}', check=False)
+    if r.status_code == 204:
+        return True
+
+    r = gh.get(f'repos/{owner}/{repo}/issues/{pull}/labels')
+    if r.status_code == 200 and 'needs-ci' in r.json():
+        return True
+
+
+def get_statuses(gh, owner, repo, sha, prefix=''):
+    """
+    Fetches all statuses of the given repository  and returns a dict mapping
+    context to its most recent status.
+    """
+
+    statuses = {}
+    for status in gh.get(f'repos/{owner}/{repo}/statuses/{sha}').json():
+        statuses.setdefault(status['context'], status)
+
+    return statuses
+
+
+def choose_task(gh, repos, images):
+    """
+    Collect tasks from open pull requests (one task for each image
+    and each open pull).
+
+    Return one of those tasks at random, so that we reduce the probability of
+    choosing the same one as another instance of this script.
+
+    Returns None if there's nothing to do.
+    """
+
+    tasks = []
+    for owner, repo in repos:
+        for pull in gh.get(f'repos/{owner}/{repo}/pulls').json():
+            author = pull['head']['user']['login']
+            head = pull['head']['sha']
+            number = pull['number']
+
+            if not pull_ok_to_test(gh, owner, repo, number, author):
+                continue
+
+            statuses = get_statuses(gh, owner, repo, head)
+            for image in images:
+                status = statuses.get('linux-system-roles-test/' + image['name'])
+
+                # Add a task if there's no status for it yet or the status is
+                # pending without a hostname in the description
+                if not status or (status['state'] == 'pending' and not status.get('description')):
+                    task = Task(owner, repo, number, head, image)
+                    tasks.append(task)
+
+    if len(tasks) > 0:
+        return random.choice(tasks)
+
+
+def scp(source, destination):
+    r = run('scp', '-o', 'IdentityFile /secrets/id_rsa',
+                   '-o', 'UserKnownHostsFile /secrets/known_hosts',
+                   '-rpq', source, destination)
+    return r.returncode == 0
+
+
+def main():
+    with open('/secrets/github-token') as f:
+        token = f.read().strip()
+
+    with open('/config/config.json') as f:
+        config = json.load(f)
+        images = config['images']
+        repos = [ r.split('/') for r in config.get('repositories', []) ]
+        results_destination = config['results']['destination']
+        results_url = config['results']['public_url']
+
+    gh = Session('https://api.github.com')
+    gh.headers.update({
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'linux-system-roles/test',
+        'Authorization': f'token {token}'
+    })
+
+    # Requests on keep-alive connections fail when the remote has closed a
+    # connection before we've noticed and sent another request. Thus,
+    # always retry sending requests once.
+    gh.mount('https://', requests.adapters.HTTPAdapter(max_retries=1))
+
+    while True:
+        task = choose_task(gh, repos, images)
+        if not task:
+            print('>>> No tasks. Waiting.')
+            time.sleep(600)
+            continue
+
+        title = f'{task.owner}/{task.repo}: pull #{task.pull} ({task.head[:7]}) on {task.image["name"]}'
+        print('>>>', title)
+
+        # When running multiple instances of this script, there's a race
+        # between choosing a task and setting the status on GitHub to "pending"
+        # (there's no race-free way to only set the status for a context when
+        # it doesn't yet exist).  Running the same tests multiple times does
+        # not affect the resulting status on GitHub, as test runs should be
+        # deterministic. We don't need to be perfect in avoiding it. 
+        #
+        # Sleep for a couple of seconds after setting the task to "pending"
+        # with our hostname as description. If the same description is set when
+        # we wake up, we know that nobody else wants to do the same task and
+        # can go ahead. Otherwise, choose something else.
+
+        gh.post(f'repos/{task.owner}/{task.repo}/statuses/{task.head}', {
+            'context': 'linux-system-roles-test/' + task.image['name'],
+            'state': 'pending',
+            'description': hostname
+        })
+
+        time.sleep(random.randint(5, 20))
+
+        statuses = get_statuses(gh, task.owner, task.repo, task.head)
+        status = statuses.get('linux-system-roles-test/' + task.image['name'])
+        if status['description'] != hostname:
+            print(f'Skip: another instance is working on this task: ' + status['description'])
+            print()
+            continue
+
+        timestamp = datetime.datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+
+        with tempfile.TemporaryDirectory() as workdir:
+            with redirect_output(f'{workdir}/test.log'):
+                print(title)
+                print(len(title) * '=')
+                print()
+                try:
+                    if task.run(f'{workdir}/artifacts', '/cache'):
+                        state = 'success'
+                    else:
+                        state = 'error'
+                except:
+                    print(traceback.format_exc())
+                    state = 'error'
+
+            run('chmod', 'a+rX', workdir)
+            if scp(workdir, f'{results_destination}/{task.id}-{timestamp}'):
+                target_url = f'{results_url}/{task.id}-{timestamp}/test.log'
+            else:
+                target_url = None
+                state = 'error'
+
+        print()
+
+        gh.post(f'repos/{task.owner}/{task.repo}/statuses/{task.head}', {
+            'context': 'linux-system-roles-test/' + task.image['name'],
+            'state': state,
+            'target_url': target_url
+        })
+
+
+if __name__ == '__main__':
+    sys.exit(main())
