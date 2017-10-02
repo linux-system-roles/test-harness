@@ -165,7 +165,7 @@ class Task:
             return False
 
         with checkout_repository(self.owner, self.repo, f'pull/{self.pull}/head') as sourcedir:
-            playbooks = []
+            setup_file = None
 
             # Generate a playbook with a single raw task to setup the image
             # (this usually means installing python2 on the guest for ansible)
@@ -180,16 +180,14 @@ class Task:
                 with open(setup_file, 'w') as f:
                     json.dump([play], f)
 
-                playbooks.append(setup_file)
-
-            # Fedora's standard test invocation spec mandates a
-            # `tests/tests.yml`, but linux-system-roles used to be tested by
-            # running all playbooks `test/test_*.yml`. Support both, but prefer
-            # the standard way. Can be removed once all repos are moved over.
-            if os.path.exists(f'{sourcedir}/tests/tests.yml'):
-                playbooks.append(f'{sourcedir}/tests/tests.yml')
-            else:
-                playbooks.extend(glob.glob(f'{sourcedir}/test/test_*.yml'))
+            # Fedora's standard test invocation spec mandates running all
+            # playbooks matching `tests/tests*.yml`, but linux-system-roles
+            # used to be tested by running all playbooks `test/test_*.yml`.
+            # Support both, but prefer the standard way. Can be removed once
+            # all repos are moved over.
+            playbooks = glob.glob(f'{sourcedir}/tests/tests*.yml')
+            if not playbooks:
+                playbooks = glob.glob(f'{sourcedir}/test/test_*.yml')
 
             for playbook in playbooks:
                 # Use the qcow2 inventory from standard-test-roles, which boots
@@ -200,7 +198,7 @@ class Task:
                 # the test playbook.
                 r = run('ansible-playbook', '-vv',
                         '--inventory=/usr/share/ansible/inventory/standard-inventory-qcow2',
-                        *playbooks,
+                        *(setup_file, playbook) if setup_file else (playbook,),
                         env={ 'TEST_SUBJECTS': image_path, 'TEST_ARTIFACTS': artifactsdir },
                         check=False)
 
