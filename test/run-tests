@@ -364,8 +364,9 @@ def main():
                     state = 'error'
 
             run('chmod', 'a+rX', workdir)
-            if scp(workdir, f'{results_destination}/{task.id}-{timestamp}'):
-                target_url = f'{results_url}/{task.id}-{timestamp}/test.log'
+            results_dir = f'{task.owner}-{task.repo}-{task.id}-{timestamp}'
+            if scp(workdir, f'{results_destination}/{results_dir}'):
+                target_url = f'{results_url}/{results_dir}/test.log'
             else:
                 target_url = None
                 state = 'error'
