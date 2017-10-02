@@ -304,15 +304,21 @@ def main():
     # always retry sending requests once.
     gh.mount('https://', requests.adapters.HTTPAdapter(max_retries=1))
 
+    printed_waiting = False
+
     while True:
         task = choose_task(gh, repos, images)
         if not task:
-            print('>>> No tasks. Waiting.')
+            if not printed_waiting:
+                print('>>> No tasks. Waiting.')
+                printed_waiting = True
             time.sleep(600)
             continue
 
         title = f'{task.owner}/{task.repo}: pull #{task.pull} ({task.head[:7]}) on {task.image["name"]}'
         print('>>>', title)
+
+        printed_waiting = False
 
         # When running multiple instances of this script, there's a race
         # between choosing a task and setting the status on GitHub to "pending"
