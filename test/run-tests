@@ -251,7 +251,7 @@ def choose_task(gh, repos, images):
     tasks = []
     for owner, repo in repos:
         for pull in gh.get(f'repos/{owner}/{repo}/pulls').json():
-            author = pull['head']['user']['login']
+            author = pull['user']['login']
             head = pull['head']['sha']
             number = pull['number']
 
