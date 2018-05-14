@@ -185,9 +185,15 @@ class Task:
             # used to be tested by running all playbooks `test/test_*.yml`.
             # Support both, but prefer the standard way. Can be removed once
             # all repos are moved over.
-            playbooks = glob.glob(f'{sourcedir}/tests/tests*.yml')
+            playbookglob = f'{sourcedir}/tests/tests*.yml'
+            playbooks = glob.glob(playbookglob)
             if not playbooks:
                 playbooks = glob.glob(f'{sourcedir}/test/test_*.yml')
+
+            if not playbooks:
+                print(f'No test playbooks found, please add at least one'
+                      'playbook that matches {playbookglob}.')
+                return False
 
             for playbook in playbooks:
                 # Use the qcow2 inventory from standard-test-roles, which boots
