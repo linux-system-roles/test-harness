@@ -206,7 +206,7 @@ class Task:
                       'playbook that matches {playbookglob}.')
                 return False
 
-            for playbook in playbooks:
+            for playbook in sorted(playbooks):
                 # Use the qcow2 inventory from standard-test-roles, which boots
                 # a transient VM and runs the playbook against that. Create a
                 # fresh instance for each test playbook. However, we do need to
