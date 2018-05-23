@@ -79,7 +79,12 @@ def run(*argv, env=None, check=True):
     Small wrapper around subprocess.run(), which prints the command to be
     executed and raises an exception by default.
     """
-    print('+ ' + ' '.join(shlex.quote(a) for a in argv))
+    if env:
+        envrepr = ' '.join(["=".join(e) for e in env.items()]) + ' '
+    else:
+        envrepr = ''
+
+    print('+ ' + envrepr + ' '.join(shlex.quote(a) for a in argv))
     return subprocess.run(argv, env=env, check=check, stdout=sys.stdout, stderr=sys.stderr)
 
 
