@@ -2,6 +2,7 @@
 
 import argparse
 import datetime
+import fnmatch
 import glob
 import json
 import logging
@@ -296,40 +297,42 @@ def scp(source, destination, secrets):
     return r.returncode == 0
 
 
-def handle_task(gh, args, config, task):
+def handle_task(gh, args, config, task, dry_run=False):
     results_destination = config['results']['destination']
     results_url = config['results']['public_url']
     title = f'{task.owner}/{task.repo}: pull #{task.pull} '
     title+= f'({task.head[:7]}) on {task.image["name"]}'
     print('>>>', title)
 
-    # When running multiple instances of this script, there's a race
-    # between choosing a task and setting the status on GitHub to "pending"
-    # (there's no race-free way to only set the status for a context when
-    # it doesn't yet exist).  Running the same tests multiple times does
-    # not affect the resulting status on GitHub, as test runs should be
-    # deterministic. We don't need to be perfect in avoiding it.
-    #
-    # Sleep for a couple of seconds after setting the task to "pending"
-    # with our hostname as description. If the same description is set when
-    # we wake up, we know that nobody else wants to do the same task and
-    # can go ahead. Otherwise, choose something else.
 
-    gh.post(f'repos/{task.owner}/{task.repo}/statuses/{task.head}', {
-        'context': 'linux-system-roles-test/' + task.image['name'],
-        'state': 'pending',
-        'description': hostname
-    })
+    if not dry_run:
+        # When running multiple instances of this script, there's a race
+        # between choosing a task and setting the status on GitHub to "pending"
+        # (there's no race-free way to only set the status for a context when
+        # it doesn't yet exist).  Running the same tests multiple times does
+        # not affect the resulting status on GitHub, as test runs should be
+        # deterministic. We don't need to be perfect in avoiding it.
+        #
+        # Sleep for a couple of seconds after setting the task to "pending"
+        # with our hostname as description. If the same description is set when
+        # we wake up, we know that nobody else wants to do the same task and
+        # can go ahead. Otherwise, choose something else.
 
-    time.sleep(random.randint(5, 20))
+        gh.post(f'repos/{task.owner}/{task.repo}/statuses/{task.head}', {
+            'context': 'linux-system-roles-test/' + task.image['name'],
+            'state': 'pending',
+            'description': hostname
+        })
 
-    statuses = get_statuses(gh, task.owner, task.repo, task.head)
-    status = statuses.get('linux-system-roles-test/' + task.image['name'])
-    if status['description'] != hostname:
-        print(f'Skip: another instance is working on this task: '
-              + status['description'])
-        print()
-        return
+        time.sleep(random.randint(5, 20))
+
+        statuses = get_statuses(gh, task.owner, task.repo, task.head)
+        status = statuses.get('linux-system-roles-test/' + task.image['name'])
+        if status['description'] != hostname:
+            print(f'Skip: another instance is working on this task: '
+                + status['description'])
+            print()
+            return
 
     timestamp = datetime.datetime.utcnow().strftime('%Y%m%d-%H%M%S')
 
@@ -352,20 +355,22 @@ def handle_task(gh, args, config, task):
 
         run('chmod', 'a+rX', workdir)
         results_dir = f'{task.owner}-{task.repo}-{task.id}-{timestamp}'
-        if scp(workdir, f'{results_destination}/{results_dir}',
-                args.secrets):
-            target_url = f'{results_url}/{results_dir}/test.log'
-        else:
-            target_url = None
-            state = 'error'
+        if not dry_run:
+            if scp(workdir, f'{results_destination}/{results_dir}',
+                    args.secrets):
+                target_url = f'{results_url}/{results_dir}/test.log'
+            else:
+                target_url = None
+                state = 'error'
 
     print()
 
-    gh.post(f'repos/{task.owner}/{task.repo}/statuses/{task.head}', {
-        'context': 'linux-system-roles-test/' + task.image['name'],
-        'state': state,
-        'target_url': target_url
-    })
+    if not dry_run:
+        gh.post(f'repos/{task.owner}/{task.repo}/statuses/{task.head}', {
+            'context': 'linux-system-roles-test/' + task.image['name'],
+            'state': state,
+            'target_url': target_url
+        })
 
 
 def main():
@@ -377,8 +382,16 @@ def main():
     parser.add_argument("--cache", default="/cache",
                         help="Directory for caching VM images")
     parser.add_argument(
-        "--inventory",
+        "--inventory", help="Inventory to use for VMs",
         default='/usr/share/ansible/inventory/standard-inventory-qcow2')
+    parser.add_argument("pull_request", nargs="*", default=None,
+                        help="Pull requests to test. Example: "
+                        "linux-system-roles/network/1")
+    parser.add_argument(
+        "--use-images", default="*",
+        help="Test pull request only against images matching this pattern")
+    parser.add_argument("--dry-run", help="Do not update pull request status",
+                        default=False, action="store_true")
 
     args = parser.parse_args()
 
@@ -404,7 +417,29 @@ def main():
 
     printed_waiting = False
 
-    while True:
+    for pull_request in args.pull_request:
+        owner, repo, pullnr = pull_request.split("/")
+        pull = gh.get(f"repos/{owner}/{repo}/pulls/{pullnr}").json()
+
+        author = pull['user']['login']
+        head = pull['head']['sha']
+        number = pull['number']
+
+        image_patterns = args.use_images.split(",")
+        test_images = []
+        for pattern in image_patterns:
+            for image in images:
+                if fnmatch.fnmatch(image["name"], pattern) or \
+                        fnmatch.fnmatch(image["source"], pattern):
+                    if not image in test_images:
+                        test_images.append(image)
+
+        for image in test_images:
+            task = Task(owner, repo, number, head, image)
+            handle_task(gh, args, config, task, args.dry_run)
+
+
+    while not args.pull_request:
         task = choose_task(gh, repos, images)
         if not task:
             if not printed_waiting:
@@ -413,7 +448,7 @@ def main():
             time.sleep(600)
             continue
 
-        handle_task(gh, args, config, task)
+        handle_task(gh, args, config, task, args.dry_run)
 
 
 if __name__ == '__main__':
