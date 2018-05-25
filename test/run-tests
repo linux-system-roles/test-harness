@@ -56,11 +56,12 @@ class redirect_output:
     A context manager that redirects stdout and stderr to a file.
     """
 
-    def __init__(self, filename):
+    def __init__(self, filename, mode="w"):
         self.filename = filename
+        self.mode = mode
 
     def __enter__(self):
-        self.f = open(self.filename, 'w', buffering=1)
+        self.f = open(self.filename, self.mode, buffering=1)
         sys.stdout.flush()
         sys.stderr.flush()
 
@@ -199,11 +200,12 @@ class Task:
             # available. Note that the implicit localhost does not match 'all'
             # [...]
             # skipping: no hosts matched
+            inventory_fail_msg = 'ERROR: Inventory is empty, tests did not run'
             fail_localhost = {'name': 'Fail when only localhost is available',
                               'hosts': 'localhost',
                               'gather_facts': False,
                               'tasks': [{'debug': {'var': 'groups'}},
-                                        {'fail': {'msg': 'Inventory is empty'},
+                                        {'fail': {'msg': inventory_fail_msg},
                                          'when': ['groups["all"] == []']}
                                        ]
                              }
@@ -237,24 +239,35 @@ class Task:
             if not playbooks:
                 print(f'No test playbooks found, please add at least one'
                       'playbook that matches {playbookglob}.')
-                return False
+                return None
 
+            ansible_log = f'{artifactsdir}/ansible.log'
             for playbook in sorted(playbooks):
-                # Use the qcow2 inventory from standard-test-roles, which boots
-                # a transient VM and runs the playbook against that. Create a
-                # fresh instance for each test playbook. However, we do need to
-                # run the setup (if it exists) in the same invocation of
-                # ansible-playbook, so that that it applies to the same VM as
-                # the test playbook.
-                result = run('ansible-playbook', '-vv',
-                             f'--inventory={inventory}',
-                             *(setup_file, playbook),
-                             env={'TEST_SUBJECTS': image_path, 'TEST_ARTIFACTS': artifactsdir},
-                             check=False)
+                print(f"Testing {playbook}...", end="")
+                with redirect_output(ansible_log, mode="a"):
+                    # Use the qcow2 inventory from standard-test-roles, which
+                    # boots a transient VM and runs the playbook against that.
+                    # Create a fresh instance for each test playbook. However,
+                    # we do need to run the setup (if it exists) in the same
+                    # invocation of ansible-playbook, so that that it applies to
+                    # the same VM as the test playbook.
+                    result = run('ansible-playbook', '-vv',
+                                 f'--inventory={inventory}',
+                                 *(setup_file, playbook),
+                                 env={'TEST_SUBJECTS': image_path, 'TEST_ARTIFACTS': artifactsdir},
+                                 check=False)
 
                 if result.returncode != 0:
+                    with open(ansible_log, "r") as ansible_file:
+                        for line in ansible_file:
+                            if inventory_fail_msg in line:
+                                print("ERROR: Inventory not properly set up")
+                                return None
+
+                    print("FAILURE")
                     return False
 
+                print("SUCCESS")
             return True
 
 
@@ -332,7 +345,7 @@ def scp(source, destination, secrets):
 def handle_task(gh, args, config, task, dry_run=False):
     results_destination = config['results']['destination']
     results_url = config['results']['public_url']
-    title = f'{task.owner}/{task.repo}: pull #{task.pull} '
+    title = f'{HOSTNAME}: {task.owner}/{task.repo}: pull #{task.pull} '
     title += f'({task.head[:7]}) on {task.image["name"]}'
     print('>>>', title)
 
@@ -368,29 +381,38 @@ def handle_task(gh, args, config, task, dry_run=False):
 
     timestamp = datetime.datetime.utcnow().strftime('%Y%m%d-%H%M%S')
 
+    description = ''
     with tempfile.TemporaryDirectory(
             prefix=f"linux-system-role-test-work-{task.id_}-") as workdir:
-        with redirect_output(f'{workdir}/test.log'):
+
+        artifactsdir = f'{workdir}/artifacts'
+        os.makedirs(artifactsdir)
+        with redirect_output(f'{artifactsdir}/test.log'):
             print(title)
             print(len(title) * '=')
             print()
             try:
                 task.inventory = args.inventory
-                if task.run(f'{workdir}/artifacts', args.cache,
-                            inventory=args.inventory):
+                result = task.run(f'{artifactsdir}', args.cache,
+                                  inventory=args.inventory)
+                if result:
                     state = 'success'
-                else:
+                elif result is None:
                     state = 'error'
-            except Exception:
+                    description = 'Error running tests'
+                else:
+                    state = 'failure'
+            except Exception as e:
                 print(traceback.format_exc())
                 state = 'error'
+                descripton = 'Exception when running tests: ' + str(e)
 
         run('chmod', 'a+rX', workdir)
         results_dir = f'{task.owner}-{task.repo}-{task.id_}-{timestamp}'
         if not dry_run:
             if scp(workdir, f'{results_destination}/{results_dir}',
                    args.secrets):
-                target_url = f'{results_url}/{results_dir}/test.log'
+                target_url = f'{results_url}/{results_dir}/artifacts/test.log'
             else:
                 target_url = None
                 state = 'error'
@@ -401,7 +423,8 @@ def handle_task(gh, args, config, task, dry_run=False):
         gh.post(f'repos/{task.owner}/{task.repo}/statuses/{task.head}', {
             'context': 'linux-system-roles-test/' + task.image['name'],
             'state': state,
-            'target_url': target_url
+            'target_url': target_url,
+            'description': description
         })
 
 
