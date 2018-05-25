@@ -1,4 +1,5 @@
 #!/usr/bin/python3 -u
+"""Test Harness for Linux System Roles"""
 
 import argparse
 import datetime
@@ -8,7 +9,6 @@ import json
 import logging
 import os
 import random
-import requests
 import shlex
 import shutil
 import socket
@@ -19,9 +19,11 @@ import time
 import traceback
 import urllib.parse
 import urllib.request
+
+import requests
 import yaml
 
-hostname = socket.gethostname()
+HOSTNAME = socket.gethostname()
 
 
 class Session(requests.Session):
@@ -132,15 +134,15 @@ class checkout_repository:
     def __init__(self, owner, repo, refspec):
         self.url = f'https://github.com/{owner}/{repo}'
         self.refspec = refspec
+        self.dir = None
 
     def __enter__(self):
         self.dir = tempfile.TemporaryDirectory()
 
         run('git', 'init', '--quiet', self.dir.name)
-        run('git', '-C', self.dir.name, 'fetch', '--quiet',
-                                                 '--depth=1',
-                                                 self.url,
-                                                 self.refspec, env={ 'GIT_TERMINAL_PROMPT': '0' })
+        run('git', '-C', self.dir.name, 'fetch', '--quiet', '--depth=1',
+            self.url, self.refspec,
+            env={'GIT_TERMINAL_PROMPT': '0'})
         run('git', '-C', self.dir.name, 'checkout', '--quiet', 'FETCH_HEAD')
 
         return self.dir.name
@@ -163,7 +165,7 @@ class Task:
         self.image = image
         self.inventory = '/usr/share/ansible/inventory/standard-inventory-qcow2'
 
-        self.id = f'pull-{self.pull}-{self.head[:7]}-' + self.image['name']
+        self.id_ = f'pull-{self.pull}-{self.head[:7]}-' + self.image['name']
 
     def run(self, artifactsdir, cachedir, inventory=None):
         """
@@ -219,8 +221,8 @@ class Task:
                 }
                 setup_plays.append(play)
 
-            with open(setup_file, 'w') as f:
-                yaml.dump(setup_plays, f)
+            with open(setup_file, 'w') as outfile:
+                yaml.dump(setup_plays, outfile)
 
             # Fedora's standard test invocation spec mandates running all
             # playbooks matching `tests/tests*.yml`, but linux-system-roles
@@ -244,13 +246,13 @@ class Task:
                 # run the setup (if it exists) in the same invocation of
                 # ansible-playbook, so that that it applies to the same VM as
                 # the test playbook.
-                r = run('ansible-playbook', '-vv',
-                        f'--inventory={inventory}',
-                        *(setup_file, playbook),
-                        env={ 'TEST_SUBJECTS': image_path, 'TEST_ARTIFACTS': artifactsdir },
-                        check=False)
+                result = run('ansible-playbook', '-vv',
+                             f'--inventory={inventory}',
+                             *(setup_file, playbook),
+                             env={'TEST_SUBJECTS': image_path, 'TEST_ARTIFACTS': artifactsdir},
+                             check=False)
 
-                if r.returncode != 0:
+                if result.returncode != 0:
                     return False
 
             return True
@@ -263,12 +265,12 @@ def pull_ok_to_test(gh, owner, repo, pull, author):
     access) or be marked with the "needs-ci" tag by a collaborator.
     """
 
-    r = gh.get(f'repos/{owner}/{repo}/collaborators/{author}', check=False)
-    if r.status_code == 204:
+    result = gh.get(f'repos/{owner}/{repo}/collaborators/{author}', check=False)
+    if result.status_code == 204:
         return True
 
-    r = gh.get(f'repos/{owner}/{repo}/issues/{pull}/labels')
-    if r.status_code == 200 and 'needs-ci' in r.json():
+    result = gh.get(f'repos/{owner}/{repo}/issues/{pull}/labels')
+    if result.status_code == 200 and 'needs-ci' in result.json():
         return True
 
 
@@ -316,22 +318,22 @@ def choose_task(gh, repos, images):
                     task = Task(owner, repo, number, head, image)
                     tasks.append(task)
 
-    if len(tasks) > 0:
+    if tasks:
         return random.choice(tasks)
 
 
 def scp(source, destination, secrets):
-    r = run('scp', '-o', f'IdentityFile {secrets}/id_rsa',
-                   '-o', f'UserKnownHostsFile {secrets}/known_hosts',
-                   '-rpq', source, destination)
-    return r.returncode == 0
+    result = run('scp', '-o', f'IdentityFile {secrets}/id_rsa',
+                 '-o', f'UserKnownHostsFile {secrets}/known_hosts',
+                 '-rpq', source, destination)
+    return result.returncode == 0
 
 
 def handle_task(gh, args, config, task, dry_run=False):
     results_destination = config['results']['destination']
     results_url = config['results']['public_url']
     title = f'{task.owner}/{task.repo}: pull #{task.pull} '
-    title+= f'({task.head[:7]}) on {task.image["name"]}'
+    title += f'({task.head[:7]}) on {task.image["name"]}'
     print('>>>', title)
 
 
@@ -351,23 +353,23 @@ def handle_task(gh, args, config, task, dry_run=False):
         gh.post(f'repos/{task.owner}/{task.repo}/statuses/{task.head}', {
             'context': 'linux-system-roles-test/' + task.image['name'],
             'state': 'pending',
-            'description': hostname
+            'description': HOSTNAME
         })
 
         time.sleep(random.randint(5, 20))
 
         statuses = get_statuses(gh, task.owner, task.repo, task.head)
         status = statuses.get('linux-system-roles-test/' + task.image['name'])
-        if status['description'] != hostname:
+        if status['description'] != HOSTNAME:
             print(f'Skip: another instance is working on this task: '
-                + status['description'])
+                  + status['description'])
             print()
             return
 
     timestamp = datetime.datetime.utcnow().strftime('%Y%m%d-%H%M%S')
 
     with tempfile.TemporaryDirectory(
-            prefix=f"linux-system-role-test-work-{task.id}-") as workdir:
+            prefix=f"linux-system-role-test-work-{task.id_}-") as workdir:
         with redirect_output(f'{workdir}/test.log'):
             print(title)
             print(len(title) * '=')
@@ -379,15 +381,15 @@ def handle_task(gh, args, config, task, dry_run=False):
                     state = 'success'
                 else:
                     state = 'error'
-            except:
+            except Exception:
                 print(traceback.format_exc())
                 state = 'error'
 
         run('chmod', 'a+rX', workdir)
-        results_dir = f'{task.owner}-{task.repo}-{task.id}-{timestamp}'
+        results_dir = f'{task.owner}-{task.repo}-{task.id_}-{timestamp}'
         if not dry_run:
             if scp(workdir, f'{results_destination}/{results_dir}',
-                    args.secrets):
+                   args.secrets):
                 target_url = f'{results_url}/{results_dir}/test.log'
             else:
                 target_url = None
@@ -431,7 +433,7 @@ def main():
     with open(args.config + '/config.json') as f:
         config = json.load(f)
         images = config['images']
-        repos = [ r.split('/') for r in config.get('repositories', []) ]
+        repos = [r.split('/') for r in config.get('repositories', [])]
 
     gh = Session('https://api.github.com')
     gh.headers.update({
