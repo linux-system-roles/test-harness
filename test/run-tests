@@ -19,6 +19,7 @@ import time
 import traceback
 import urllib.parse
 import urllib.request
+import yaml
 
 hostname = socket.gethostname()
 
@@ -181,16 +182,45 @@ class Task:
 
             # Generate a playbook with a single raw task to setup the image
             # (this usually means installing python2 on the guest for ansible)
+            setup_file = os.path.join(sourcedir, '_setup.yml')
+
+            # Playbook to fail when only localhost is available. This happens
+            # when the inventory script fails. Then ansible-playbook would just
+            # skip the tests with this warnings:
+            #
+            # [WARNING]: Unable to parse
+            # /usr/share/ansible/inventory/standard-inventory-qcow2 as an
+            # inventory source
+            # [WARNING]: No inventory was parsed, only implicit localhost is
+            # available
+            # [WARNING]: provided hosts list is empty, only localhost is
+            # available. Note that the implicit localhost does not match 'all'
+            # [...]
+            # skipping: no hosts matched
+            fail_localhost = {'name': 'Fail when only localhost is available',
+                              'hosts': 'localhost',
+                              'gather_facts': False,
+                              'tasks': [{'debug': {'var': 'groups'}},
+                                        {'fail': {'msg': 'Inventory is empty'},
+                                         'when': ['groups["all"] == []']}
+                                       ]
+                             }
+
+            setup_plays = [fail_localhost]
             if 'setup' in self.image:
-                setup_file = os.path.join(sourcedir, '_setup.yml')
                 play = {
-                    'name': 'Setup', 'hosts': 'all', 'become': True, 'gather_facts': False,
+                    'name': 'Setup',
+                    'hosts': 'all',
+                    'become': True,
+                    'gather_facts': False,
                     'tasks': [
-                        { 'raw': self.image['setup'] }
+                        {'raw': self.image['setup']}
                     ]
                 }
-                with open(setup_file, 'w') as f:
-                    json.dump([play], f)
+                setup_plays.append(play)
+
+            with open(setup_file, 'w') as f:
+                yaml.dump(setup_plays, f)
 
             # Fedora's standard test invocation spec mandates running all
             # playbooks matching `tests/tests*.yml`, but linux-system-roles
@@ -216,7 +246,7 @@ class Task:
                 # the test playbook.
                 r = run('ansible-playbook', '-vv',
                         f'--inventory={inventory}',
-                        *(setup_file, playbook) if setup_file else (playbook,),
+                        *(setup_file, playbook),
                         env={ 'TEST_SUBJECTS': image_path, 'TEST_ARTIFACTS': artifactsdir },
                         check=False)
 
