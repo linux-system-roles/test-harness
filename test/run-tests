@@ -399,7 +399,7 @@ def handle_task(gh, args, config, task, dry_run=False):
                     state = 'success'
                 elif result is None:
                     state = 'error'
-                    description = 'Error running tests'
+                    description = 'Error running tests on ' + HOSTNAME
                 else:
                     state = 'failure'
             except Exception as e:
