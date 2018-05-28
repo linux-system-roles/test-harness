@@ -238,7 +238,7 @@ class Task:
 
             if not playbooks:
                 print(f'No test playbooks found, please add at least one'
-                      'playbook that matches {playbookglob}.')
+                      f'playbook that matches {playbookglob}.')
                 return None
 
             ansible_log = f'{artifactsdir}/ansible.log'
