@@ -8,7 +8,7 @@ machines.
 
 To build the container, run
 
-    docker build --tag linux-system-roles-test .
+    sudo docker build -t linuxsystemroles/test-harness:latest .
 
 Multiple of these containers can be started in parallel. They try to not step
 on each others feet by synchronizing via GitHub commit statuses.
@@ -20,17 +20,32 @@ accessible URL for these results. For example:
 
 ```json
   "repositories": [
-    "linux-system-roles/network"
+    "linux-system-roles/network",
+    "linux-system-roles/selinux",
+    "linux-system-roles/timesync",
+    "linux-system-roles/tuned",
+    "linux-system-roles/kdump",
+    "linux-system-roles/firewall",
+    "linux-system-roles/postfix",
   ],
   "images": [
     {
-      "name": "fedora-26",
-      "source": "https://download.fedoraproject.org/pub/fedora/linux/releases/26/CloudImages/x86_64/images/Fedora-Cloud-Base-26-1.5.x86_64.qcow2",
+      "name": "fedora-27",
+      "source": "https://download.fedoraproject.org/pub/fedora/linux/releases/27/CloudImages/x86_64/images/Fedora-Cloud-Base-27-1.6.x86_64.qcow2"
       "setup": "sudo dnf install -yq python2 python2-dnf libselinux-python"
     },
     {
+      "name": "fedora-28",
+      "source": "https://download.fedoraproject.org/pub/fedora/linux/releases/28/Cloud/x86_64/images/Fedora-Cloud-Base-28-1.1.x86_64.qcow2",
+      "setup": "sudo dnf install -yq python2 python2-dnf libselinux-python"
+    },
+    {
+      "name": "centos-6",
+      "source": "https://cloud.centos.org/centos/6/images/CentOS-6-x86_64-GenericCloud-1804_02.qcow2c"
+    },
+    {
       "name": "centos-7",
-      "source": "https://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud-1702.qcow2"
+      "source": "https://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud-1804_02.qcow2c"
     }
   ],
   "results": {
