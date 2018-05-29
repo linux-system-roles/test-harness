@@ -382,50 +382,58 @@ def handle_task(gh, args, config, task, dry_run=False):
     timestamp = datetime.datetime.utcnow().strftime('%Y%m%d-%H%M%S')
 
     description = ''
-    with tempfile.TemporaryDirectory(
-            prefix=f"linux-system-role-test-work-{task.id_}-") as workdir:
 
-        artifactsdir = f'{workdir}/artifacts'
-        os.makedirs(artifactsdir)
-        with redirect_output(f'{artifactsdir}/test.log'):
-            print(title)
-            print(len(title) * '=')
-            print()
-            try:
-                task.inventory = args.inventory
-                result = task.run(f'{artifactsdir}', args.cache,
-                                  inventory=args.inventory)
-                if result:
-                    state = 'success'
-                elif result is None:
-                    state = 'error'
-                    description = 'Error running tests on ' + HOSTNAME
-                else:
-                    state = 'failure'
-            except Exception as e:
-                print(traceback.format_exc())
+    workdir = tempfile.mkdtemp(
+        prefix=f"linux-system-role-test-work-{task.id_}-")
+    artifactsdir = f'{workdir}/artifacts'
+    os.makedirs(artifactsdir)
+
+    with redirect_output(f'{artifactsdir}/test.log'):
+        print(title)
+        print(len(title) * '=')
+        print()
+        try:
+            task.inventory = args.inventory
+            result = task.run(f'{artifactsdir}', args.cache,
+                              inventory=args.inventory)
+            if result:
+                state = 'success'
+            elif result is None:
                 state = 'error'
-                descripton = 'Exception when running tests: ' + str(e)
-
-        run('chmod', 'a+rX', workdir)
-        results_dir = f'{task.owner}-{task.repo}-{task.id_}-{timestamp}'
-        if not dry_run:
-            if scp(workdir, f'{results_destination}/{results_dir}',
-                   args.secrets):
-                target_url = f'{results_url}/{results_dir}/artifacts/test.log'
+                description = 'Error running tests on ' + HOSTNAME
             else:
-                target_url = None
-                state = 'error'
+                state = 'failure'
 
-    print()
+        # pylint: disable=broad-except,invalid-name
+        except Exception as e:
+            print(traceback.format_exc())
+            state = 'error'
+            description = 'Exception when running tests: ' + str(e)
 
-    if not dry_run:
+    run('chmod', 'a+rX', workdir)
+    results_dir = f'{task.owner}-{task.repo}-{task.id_}-{timestamp}'
+
+    if dry_run:
+        print(f"Artifacts kept at: {artifactsdir}")
+        with open(f"{artifactsdir}/test.log") as test_log:
+            print(test_log.read())
+    else:
+        if scp(workdir, f'{results_destination}/{results_dir}',
+               args.secrets):
+            target_url = f'{results_url}/{artifactsdir}/test.log'
+        else:
+            target_url = None
+            state = 'error'
+        # FIXME: workdir might be kept when python crashes
+        shutil.rmtree(workdir)
+
         gh.post(f'repos/{task.owner}/{task.repo}/statuses/{task.head}', {
             'context': 'linux-system-roles-test/' + task.image['name'],
             'state': state,
             'target_url': target_url,
             'description': description
         })
+    print()
 
 
 def main():
@@ -445,13 +453,18 @@ def main():
     parser.add_argument(
         "--use-images", default="*",
         help="Test pull request only against images matching this pattern")
-    parser.add_argument("--dry-run", help="Do not update pull request status",
-                        default=False, action="store_true")
+    parser.add_argument(
+        "--dry-run",
+        help="Do not update pull request status or upload artifacts",
+        default=False, action="store_true")
 
     args = parser.parse_args()
 
-    with open(args.secrets + '/github-token') as f:
-        token = f.read().strip()
+    if args.dry_run:
+        token = ""
+    else:
+        with open(args.secrets + '/github-token') as f:
+            token = f.read().strip()
 
     with open(args.config + '/config.json') as f:
         config = json.load(f)
@@ -462,8 +475,12 @@ def main():
     gh.headers.update({
         'Accept': 'application/vnd.github.v3+json',
         'User-Agent': 'linux-system-roles/test',
-        'Authorization': f'token {token}'
     })
+
+    if token:
+        gh.headers.update({
+            'Authorization': f'token {token}'
+        })
 
     # Requests on keep-alive connections fail when the remote has closed a
     # connection before we've noticed and sent another request. Thus,
@@ -476,7 +493,6 @@ def main():
         owner, repo, pullnr = pull_request.split("/")
         pull = gh.get(f"repos/{owner}/{repo}/pulls/{pullnr}").json()
 
-        author = pull['user']['login']
         head = pull['head']['sha']
         number = pull['number']
 
