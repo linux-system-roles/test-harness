@@ -31,7 +31,7 @@ accessible URL for these results. For example:
   "images": [
     {
       "name": "fedora-27",
-      "source": "https://download.fedoraproject.org/pub/fedora/linux/releases/27/CloudImages/x86_64/images/Fedora-Cloud-Base-27-1.6.x86_64.qcow2"
+      "source": "https://download.fedoraproject.org/pub/fedora/linux/releases/27/CloudImages/x86_64/images/Fedora-Cloud-Base-27-1.6.x86_64.qcow2",
       "setup": "sudo dnf install -yq python2 python2-dnf libselinux-python"
     },
     {
