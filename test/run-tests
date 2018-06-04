@@ -491,9 +491,13 @@ def main():
 
     for pull_request in args.pull_request:
         owner, repo, pullnr = pull_request.split("/")
+        head = None
+        if "#" in pullnr:
+            pullnr, head = pullnr.split("#")
         pull = gh.get(f"repos/{owner}/{repo}/pulls/{pullnr}").json()
 
-        head = pull['head']['sha']
+        if not head:
+            head = pull['head']['sha']
         number = pull['number']
 
         image_patterns = args.use_images.split(",")
