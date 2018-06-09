@@ -420,7 +420,7 @@ def handle_task(gh, args, config, task, dry_run=False):
     else:
         if scp(workdir, f'{results_destination}/{results_dir}',
                args.secrets):
-            target_url = f'{results_url}/{artifactsdir}/test.log'
+            target_url = f'{results_url}/{results_dir}/artifacts/test.log'
         else:
             target_url = None
             state = 'error'
