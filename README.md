@@ -37,7 +37,17 @@ accessible URL for these results. For example:
     {
       "name": "fedora-28",
       "source": "https://download.fedoraproject.org/pub/fedora/linux/releases/28/Cloud/x86_64/images/Fedora-Cloud-Base-28-1.1.x86_64.qcow2",
-      "setup": "sudo dnf install -yq python2 python2-dnf libselinux-python"
+      "setup": [
+        {
+          "name": "Setup",
+          "hosts": "all",
+          "become": true,
+          "gather_facts": false,
+          "tasks": [
+            {"raw": "sudo dnf install -yq python2 python2-dnf libselinux-python"}
+          ]
+        }
+      ]
     },
     {
       "name": "centos-6",
@@ -54,6 +64,8 @@ accessible URL for these results. For example:
   }
 }
 ```
+
+The `setup` key contains either a list of Ansible plays which will be saved as a playbook and executed before the test run, or a single shell command which will be executed using the Ansible `raw` module (so the two examples above are exactly equivalent).
 
 The container needs a `/secrets` mount, which must contain these files:
 
