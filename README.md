@@ -19,6 +19,7 @@ a location where to copy (via ssh) the test results to, and a publicly
 accessible URL for these results. For example:
 
 ```json
+{
   "repositories": [
     "linux-system-roles/network",
     "linux-system-roles/selinux",
@@ -26,7 +27,7 @@ accessible URL for these results. For example:
     "linux-system-roles/tuned",
     "linux-system-roles/kdump",
     "linux-system-roles/firewall",
-    "linux-system-roles/postfix",
+    "linux-system-roles/postfix"
   ],
   "images": [
     {
