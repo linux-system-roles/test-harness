@@ -281,7 +281,7 @@ class Task:
             return True
 
 
-def pull_ok_to_test(gh, owner, repo, pull, author):
+def pull_ok_to_test(gh, owner, repo, pull, author, head):
     """
     Returns True if we trust the pull request enough to run its code. It must
     either come from a collaborator of the repository (a github user with push
@@ -291,6 +291,18 @@ def pull_ok_to_test(gh, owner, repo, pull, author):
     result = gh.get(f'repos/{owner}/{repo}/collaborators/{author}', check=False)
     if result.status_code == 204:
         return True
+
+    # Check if a member commented with a command like
+    # ci-check-commit:<commit-hash>
+    # to allow to check this commit
+    result = gh.get(f'repos/{owner}/{repo}/issues/{pull}/comments')
+    if result.status_code == 200:
+        whitelist_command = f'ci-check-commit:{head}'
+        for comment in result.json():
+            if comment['author_association'] == 'MEMBER':
+                if whitelist_command in comment['body']:
+                    return True
+
 
     result = gh.get(f'repos/{owner}/{repo}/issues/{pull}/labels')
     if result.status_code == 200 and 'needs-ci' in result.json():
@@ -328,7 +340,7 @@ def choose_task(gh, repos, images):
             head = pull['head']['sha']
             number = pull['number']
 
-            if not pull_ok_to_test(gh, owner, repo, number, author):
+            if not pull_ok_to_test(gh, owner, repo, number, author, head):
                 continue
 
             statuses = get_statuses(gh, owner, repo, head)
