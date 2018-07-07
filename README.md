@@ -33,11 +33,13 @@ accessible URL for these results. For example:
     {
       "name": "fedora-27",
       "source": "https://download.fedoraproject.org/pub/fedora/linux/releases/27/CloudImages/x86_64/images/Fedora-Cloud-Base-27-1.6.x86_64.qcow2",
+      "upload_results": true,
       "setup": "sudo dnf install -yq python2 python2-dnf libselinux-python"
     },
     {
       "name": "fedora-28",
       "source": "https://download.fedoraproject.org/pub/fedora/linux/releases/28/Cloud/x86_64/images/Fedora-Cloud-Base-28-1.1.x86_64.qcow2",
+      "upload_results": true,
       "setup": [
         {
           "name": "Setup",
@@ -52,11 +54,13 @@ accessible URL for these results. For example:
     },
     {
       "name": "centos-6",
-      "source": "https://cloud.centos.org/centos/6/images/CentOS-6-x86_64-GenericCloud-1804_02.qcow2c"
+      "source": "https://cloud.centos.org/centos/6/images/CentOS-6-x86_64-GenericCloud-1804_02.qcow2c",
+      "upload_results": true
     },
     {
       "name": "centos-7",
-      "source": "https://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud-1804_02.qcow2c"
+      "source": "https://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud-1804_02.qcow2c",
+      "upload_results": true
     }
   ],
   "results": {
