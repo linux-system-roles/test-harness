@@ -5,6 +5,7 @@ import argparse
 import datetime
 import fnmatch
 import glob
+import html
 import json
 import logging
 import os
@@ -364,6 +365,29 @@ def scp(source, destination, secrets):
     return result.returncode == 0
 
 
+def make_html(source_file):
+    links = {"index": ".", "ansible log": "ansible.log"}
+    html_file = source_file + ".html"
+
+    anchors = ""
+    for name, target in links.items():
+        a_html = "<a href='{}'>{}</a> ".format(html.escape(target),
+                                              html.escape(name))
+        anchors += a_html
+
+    with open(source_file) as ifile:
+        textdata = ifile.read()
+
+    html_code = """<pre>{}</pre>
+{}
+    """.format(html.escape(textdata), anchors)
+
+    with open(html_file, "w") as ofile:
+        ofile.write(html_code)
+
+    return html_file
+
+
 def handle_task(gh, args, config, task, dry_run=False):
     title = f'{HOSTNAME}: {task.owner}/{task.repo}: pull #{task.pull} '
     title += f'({task.head[:7]}) on {task.image["name"]}'
@@ -439,6 +463,7 @@ def handle_task(gh, args, config, task, dry_run=False):
         with open(local_test_log) as test_log:
             print(test_log.read())
     else:
+        make_html(local_test_log)
 
         if task.image.get("upload_results"):
             results_destination = config['results']['destination']
@@ -448,7 +473,7 @@ def handle_task(gh, args, config, task, dry_run=False):
             if scp(workdir, f'{results_destination}/{results_dir}',
                    args.secrets):
                 target_url = \
-                    f'{results_url}/{results_dir}/artifacts/test.log'
+                    f'{results_url}/{results_dir}/artifacts/test.log.html'
             else:
                 target_url = None
                 state = 'error'
