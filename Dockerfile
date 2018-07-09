@@ -1,12 +1,10 @@
 FROM fedora:28
 
-RUN dnf update -y
-
-RUN dnf install -y \
+RUN dnf update -y && dnf install -y \
     ansible \
     git \
     python3-requests \
-    standard-test-roles
+    standard-test-roles && dnf clean all
 
 RUN useradd -m tester
 USER tester
