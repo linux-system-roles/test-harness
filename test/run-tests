@@ -319,13 +319,12 @@ def pull_ok_to_test(gh, owner, repo, pull, author, head):
     # Check if a member commented with a command like
     # ci-check-commit:<commit-hash>
     # to allow to check this commit
-    result = gh.get(f"repos/{owner}/{repo}/issues/{pull}/comments")
-    if result.status_code == 200:
-        whitelist_command = f"ci-check-commit:{head}"
-        for comment in result.json():
-            if comment["author_association"] == "MEMBER":
-                if whitelist_command in comment["body"]:
-                    return True
+    comments = get_comments(gh, owner, repo, pull)
+    whitelist_command = f"[citest commit:{head}]"
+    for comment in comments:
+        if comment["author_association"] == "MEMBER":
+            if whitelist_command in comment["body"]:
+                return True
 
     result = gh.get(f"repos/{owner}/{repo}/issues/{pull}/labels")
     if result.status_code == 200 and "needs-ci" in result.json():
@@ -343,6 +342,23 @@ def get_statuses(gh, owner, repo, sha):
         statuses.setdefault(status["context"], status)
 
     return statuses
+
+
+def get_comments(gh, owner, repo, pullnr, after=""):
+    """ Get comments for a pull request, optionally after a certain time """
+    result = gh.get(f"repos/{owner}/{repo}/issues/{pullnr}/comments")
+    comments = []
+    if result.status_code == 200:
+        comments = result.json()
+
+    new_comments = []
+    for comment in comments:
+        comment_update = comment["updated_at"]
+        if comment_update > after:
+            new_comments.append(comment)
+    comments = new_comments
+
+    return comments
 
 
 def choose_task(gh, repos, images):
@@ -370,16 +386,45 @@ def choose_task(gh, repos, images):
             for image in images:
                 status = statuses.get("linux-system-roles-test/" + image["name"])
 
-                # Add a task if there's no status for it yet or the status is
-                # pending without a hostname in the description
-                if not status or (
-                    status["state"] == "pending" and not status.get("description")
-                ):
+                if check_commit_needs_testing(gh, status, owner, repo, number):
                     task = Task(owner, repo, number, head, image)
                     tasks.append(task)
 
     if tasks:
         return random.choice(tasks)
+
+
+def check_commit_needs_testing(gh, status, owner, repo, pullnr):
+    """ Check if commit needs to be checked """
+    # Check it, if there's no status for it yet
+    if not status:
+        return True
+
+    # or the status is pending without a hostname in the description
+    if status["state"] == "pending" and not status.get("description"):
+        return True
+
+    last_status_update = status["updated_at"]
+    comments = get_comments(gh, owner, repo, pullnr, after=last_status_update)
+
+    # or a generic re-check was requested:
+    for comment in comments:
+        if "[citest]" in comment["body"]:
+            return True
+
+    # or the status is error or failure and a re-check was requested
+    if status["state"] == "error" or status["state"] == "failure":
+        for comment in comments:
+            if "[citest bad]" in comment["body"]:
+                return True
+
+    # or the status is pending and a re-check was requested
+    if status["state"] == "pending":
+        for comment in comments:
+            if "[citest pending]" in comment["body"]:
+                return True
+
+    return False
 
 
 def scp(source, destination, secrets):
