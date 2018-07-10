@@ -642,7 +642,9 @@ def main():
     for pull_request in args.pull_request:
         # supports to specify the PR with full URLs or just the path
         parsed_url = urllib.parse.urlparse(pull_request)
-        owner, repo, pullnr = parsed_url.strip("/").replace("/pull/", "/").split("/")
+        owner, repo, pullnr = (
+            parsed_url.path.strip("/").replace("/pull/", "/").split("/")
+        )
 
         head = parsed_url.fragment
         pull = gh.get(f"repos/{owner}/{repo}/pulls/{pullnr}").json()
