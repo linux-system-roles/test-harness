@@ -509,7 +509,7 @@ def handle_task(gh, args, config, task, dry_run=False):
 
     timestamp = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
 
-    description = ""
+    description = HOSTNAME
 
     workdir = tempfile.mkdtemp(prefix=f"linux-system-role-test-work-{task.id_}-")
     artifactsdir = f"{workdir}/artifacts"
@@ -526,7 +526,7 @@ def handle_task(gh, args, config, task, dry_run=False):
                 state = "success"
             elif result is None:
                 state = "error"
-                description = "Error running tests on " + HOSTNAME
+                description += ": Error running tests"
             else:
                 state = "failure"
 
@@ -534,7 +534,7 @@ def handle_task(gh, args, config, task, dry_run=False):
         except Exception as e:
             print(traceback.format_exc())
             state = "error"
-            description = "Exception when running tests: " + str(e)
+            description += ": Exception when running tests: " + str(e)
 
     run("chmod", "a+rX", workdir)
 
@@ -557,6 +557,7 @@ def handle_task(gh, args, config, task, dry_run=False):
             else:
                 target_url = None
                 state = "error"
+                description += ": Error uploading results"
         else:
             target_url = None
 
