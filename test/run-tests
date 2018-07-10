@@ -334,8 +334,8 @@ def pull_ok_to_test(gh, owner, repo, pull, author, head):
 
 def get_statuses(gh, owner, repo, sha):
     """
-    Fetches all statuses of the given repository  and returns a dict mapping
-    context to its most recent status.
+    Fetches all statuses of the given commit in a repository and returns a dict
+    mapping context to its most recent status.
     """
 
     statuses = {}
