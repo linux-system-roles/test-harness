@@ -39,14 +39,14 @@ class Session(requests.Session):
         self.host = host
         self.timeout = timeout
 
-    def post(self, path, json, check=True):
-        r = super().post(f'{self.host}/{path}', json=json, timeout=self.timeout)
+    def post(self, path, json_, check=True):
+        r = super().post(f"{self.host}/{path}", json=json_, timeout=self.timeout)
         if check:
             r.raise_for_status()
         return r
 
     def get(self, path, check=True):
-        r = super().get(f'{self.host}/{path}', timeout=self.timeout)
+        r = super().get(f"{self.host}/{path}", timeout=self.timeout)
         if check:
             r.raise_for_status()
         return r
@@ -88,17 +88,18 @@ def run(*argv, env=None, check=True):
     """
     runenv = dict(os.environ)
     if env:
-        envrepr = ' '.join(["=".join(e) for e in env.items()]) + ' '
+        envrepr = " ".join(["=".join(e) for e in env.items()]) + " "
     else:
-        envrepr = ''
+        envrepr = ""
 
     if env:
         runenv.update(env)
 
-    print('+ ' + envrepr + ' '.join(shlex.quote(a) for a in argv))
+    print("+ " + envrepr + " ".join(shlex.quote(a) for a in argv))
 
-    return subprocess.run(argv, env=runenv, check=check, stdout=sys.stdout,
-                          stderr=sys.stderr)
+    return subprocess.run(
+        argv, env=runenv, check=check, stdout=sys.stdout, stderr=sys.stderr
+    )
 
 
 def fetch_image(url, cache):
@@ -114,21 +115,21 @@ def fetch_image(url, cache):
     path = os.path.join(cache, fn)
 
     if not os.path.exists(path):
-        print(f'Fetch {url}')
+        print(f"Fetch {url}")
 
         f = tempfile.NamedTemporaryFile(dir=cache, delete=False)
         try:
             request = urllib.request.urlopen(url)
             shutil.copyfileobj(request, f)
             request.close()
-        except:
+        except Exception:
             logging.warning(traceback.format_exc())
             os.unlink(f.name)
             return None
 
         os.rename(f.name, path)
     else:
-        print(f'Use cached {fn}')
+        print(f"Use cached {fn}")
 
     return path
 
@@ -140,18 +141,26 @@ class checkout_repository:
     """
 
     def __init__(self, owner, repo, refspec):
-        self.url = f'https://github.com/{owner}/{repo}'
+        self.url = f"https://github.com/{owner}/{repo}"
         self.refspec = refspec
         self.dir = None
 
     def __enter__(self):
         self.dir = tempfile.TemporaryDirectory()
 
-        run('git', 'init', '--quiet', self.dir.name)
-        run('git', '-C', self.dir.name, 'fetch', '--quiet', '--depth=1',
-            self.url, self.refspec,
-            env={'GIT_TERMINAL_PROMPT': '0'})
-        run('git', '-C', self.dir.name, 'checkout', '--quiet', 'FETCH_HEAD')
+        run("git", "init", "--quiet", self.dir.name)
+        run(
+            "git",
+            "-C",
+            self.dir.name,
+            "fetch",
+            "--quiet",
+            "--depth=1",
+            self.url,
+            self.refspec,
+            env={"GIT_TERMINAL_PROMPT": "0"},
+        )
+        run("git", "-C", self.dir.name, "checkout", "--quiet", "FETCH_HEAD")
 
         return self.dir.name
 
@@ -171,9 +180,9 @@ class Task:
         self.pull = pull
         self.head = head
         self.image = image
-        self.inventory = '/usr/share/ansible/inventory/standard-inventory-qcow2'
+        self.inventory = "/usr/share/ansible/inventory/standard-inventory-qcow2"
 
-        self.id_ = f'pull-{self.pull}-{self.head[:7]}-' + self.image['name']
+        self.id_ = f"pull-{self.pull}-{self.head[:7]}-" + self.image["name"]
 
     def run(self, artifactsdir, cachedir, inventory=None):
         """
@@ -183,16 +192,18 @@ class Task:
 
         if not inventory:
             inventory = self.inventory
-        image_path = fetch_image(self.image['source'], cachedir)
+        image_path = fetch_image(self.image["source"], cachedir)
         if not image_path:
             return False
 
-        with checkout_repository(self.owner, self.repo, f'pull/{self.pull}/head') as sourcedir:
+        with checkout_repository(
+            self.owner, self.repo, f"pull/{self.pull}/head"
+        ) as sourcedir:
             setup_file = None
 
             # Generate a playbook with a single raw task to setup the image
             # (this usually means installing python2 on the guest for ansible)
-            setup_file = os.path.join(sourcedir, '_setup.yml')
+            setup_file = os.path.join(sourcedir, "_setup.yml")
 
             # Playbook to fail when only localhost is available. This happens
             # when the inventory script fails. Then ansible-playbook would just
@@ -207,34 +218,35 @@ class Task:
             # available. Note that the implicit localhost does not match 'all'
             # [...]
             # skipping: no hosts matched
-            inventory_fail_msg = 'ERROR: Inventory is empty, tests did not run'
-            fail_localhost = {'name': 'Fail when only localhost is available',
-                              'hosts': 'localhost',
-                              'gather_facts': False,
-                              'tasks': [{'debug': {'var': 'groups'}},
-                                        {'fail': {'msg': inventory_fail_msg},
-                                         'when': ['groups["all"] == []']}
-                                       ]
-                             }
+            inventory_fail_msg = "ERROR: Inventory is empty, tests did not run"
+            fail_localhost = {
+                "name": "Fail when only localhost is available",
+                "hosts": "localhost",
+                "gather_facts": False,
+                "tasks": [
+                    {"debug": {"var": "groups"}},
+                    {
+                        "fail": {"msg": inventory_fail_msg},
+                        "when": ['groups["all"] == []'],
+                    },
+                ],
+            }
 
             setup_plays = [fail_localhost]
-            if 'setup' in self.image:
-                setup = self.image['setup']
-                if isinstance(self.image['setup'], str):
+            if "setup" in self.image:
+                if isinstance(self.image["setup"], str):
                     play = {
-                        'name': 'Setup',
-                        'hosts': 'all',
-                        'become': True,
-                        'gather_facts': False,
-                        'tasks': [
-                            {'raw': self.image['setup']}
-                        ]
+                        "name": "Setup",
+                        "hosts": "all",
+                        "become": True,
+                        "gather_facts": False,
+                        "tasks": [{"raw": self.image["setup"]}],
                     }
                     setup_plays.append(play)
                 else:
-                    setup_plays.extend(self.image['setup'])
+                    setup_plays.extend(self.image["setup"])
 
-            with open(setup_file, 'w') as outfile:
+            with open(setup_file, "w") as outfile:
                 yaml.dump(setup_plays, outfile)
 
             # Fedora's standard test invocation spec mandates running all
@@ -242,17 +254,19 @@ class Task:
             # used to be tested by running all playbooks `test/test_*.yml`.
             # Support both, but prefer the standard way. Can be removed once
             # all repos are moved over.
-            playbookglob = f'{sourcedir}/tests/tests*.yml'
+            playbookglob = f"{sourcedir}/tests/tests*.yml"
             playbooks = glob.glob(playbookglob)
             if not playbooks:
-                playbooks = glob.glob(f'{sourcedir}/test/test_*.yml')
+                playbooks = glob.glob(f"{sourcedir}/test/test_*.yml")
 
             if not playbooks:
-                print(f'No test playbooks found, please add at least one'
-                      f'playbook that matches {playbookglob}.')
+                print(
+                    f"No test playbooks found, please add at least one"
+                    f"playbook that matches {playbookglob}."
+                )
                 return None
 
-            ansible_log = f'{artifactsdir}/ansible.log'
+            ansible_log = f"{artifactsdir}/ansible.log"
             for playbook in sorted(playbooks):
                 print(f"Testing {playbook}...", end="")
                 with redirect_output(ansible_log, mode="a"):
@@ -260,13 +274,19 @@ class Task:
                     # boots a transient VM and runs the playbook against that.
                     # Create a fresh instance for each test playbook. However,
                     # we do need to run the setup (if it exists) in the same
-                    # invocation of ansible-playbook, so that that it applies to
-                    # the same VM as the test playbook.
-                    result = run('ansible-playbook', '-vv',
-                                 f'--inventory={inventory}',
-                                 *(setup_file, playbook),
-                                 env={'TEST_SUBJECTS': image_path, 'TEST_ARTIFACTS': artifactsdir},
-                                 check=False)
+                    # invocation of ansible-playbook, so that that it applies
+                    # to the same VM as the test playbook.
+                    result = run(
+                        "ansible-playbook",
+                        "-vv",
+                        f"--inventory={inventory}",
+                        *(setup_file, playbook),
+                        env={
+                            "TEST_SUBJECTS": image_path,
+                            "TEST_ARTIFACTS": artifactsdir,
+                        },
+                        check=False,
+                    )
 
                 if result.returncode != 0:
                     with open(ansible_log, "r") as ansible_file:
@@ -289,36 +309,35 @@ def pull_ok_to_test(gh, owner, repo, pull, author, head):
     access) or be marked with the "needs-ci" tag by a collaborator.
     """
 
-    result = gh.get(f'repos/{owner}/{repo}/collaborators/{author}', check=False)
+    result = gh.get(f"repos/{owner}/{repo}/collaborators/{author}", check=False)
     if result.status_code == 204:
         return True
 
     # Check if a member commented with a command like
     # ci-check-commit:<commit-hash>
     # to allow to check this commit
-    result = gh.get(f'repos/{owner}/{repo}/issues/{pull}/comments')
+    result = gh.get(f"repos/{owner}/{repo}/issues/{pull}/comments")
     if result.status_code == 200:
-        whitelist_command = f'ci-check-commit:{head}'
+        whitelist_command = f"ci-check-commit:{head}"
         for comment in result.json():
-            if comment['author_association'] == 'MEMBER':
-                if whitelist_command in comment['body']:
+            if comment["author_association"] == "MEMBER":
+                if whitelist_command in comment["body"]:
                     return True
 
-
-    result = gh.get(f'repos/{owner}/{repo}/issues/{pull}/labels')
-    if result.status_code == 200 and 'needs-ci' in result.json():
+    result = gh.get(f"repos/{owner}/{repo}/issues/{pull}/labels")
+    if result.status_code == 200 and "needs-ci" in result.json():
         return True
 
 
-def get_statuses(gh, owner, repo, sha, prefix=''):
+def get_statuses(gh, owner, repo, sha, prefix=""):
     """
     Fetches all statuses of the given repository  and returns a dict mapping
     context to its most recent status.
     """
 
     statuses = {}
-    for status in gh.get(f'repos/{owner}/{repo}/statuses/{sha}').json():
-        statuses.setdefault(status['context'], status)
+    for status in gh.get(f"repos/{owner}/{repo}/statuses/{sha}").json():
+        statuses.setdefault(status["context"], status)
 
     return statuses
 
@@ -336,21 +355,23 @@ def choose_task(gh, repos, images):
 
     tasks = []
     for owner, repo in repos:
-        for pull in gh.get(f'repos/{owner}/{repo}/pulls').json():
-            author = pull['user']['login']
-            head = pull['head']['sha']
-            number = pull['number']
+        for pull in gh.get(f"repos/{owner}/{repo}/pulls").json():
+            author = pull["user"]["login"]
+            head = pull["head"]["sha"]
+            number = pull["number"]
 
             if not pull_ok_to_test(gh, owner, repo, number, author, head):
                 continue
 
             statuses = get_statuses(gh, owner, repo, head)
             for image in images:
-                status = statuses.get('linux-system-roles-test/' + image['name'])
+                status = statuses.get("linux-system-roles-test/" + image["name"])
 
                 # Add a task if there's no status for it yet or the status is
                 # pending without a hostname in the description
-                if not status or (status['state'] == 'pending' and not status.get('description')):
+                if not status or (
+                    status["state"] == "pending" and not status.get("description")
+                ):
                     task = Task(owner, repo, number, head, image)
                     tasks.append(task)
 
@@ -359,9 +380,16 @@ def choose_task(gh, repos, images):
 
 
 def scp(source, destination, secrets):
-    result = run('scp', '-o', f'IdentityFile {secrets}/id_rsa',
-                 '-o', f'UserKnownHostsFile {secrets}/known_hosts',
-                 '-rpq', source, destination)
+    result = run(
+        "scp",
+        "-o",
+        f"IdentityFile {secrets}/id_rsa",
+        "-o",
+        f"UserKnownHostsFile {secrets}/known_hosts",
+        "-rpq",
+        source,
+        destination,
+    )
     return result.returncode == 0
 
 
@@ -371,8 +399,7 @@ def make_html(source_file):
 
     anchors = ""
     for name, target in links.items():
-        a_html = "<a href='{}'>{}</a> ".format(html.escape(target),
-                                              html.escape(name))
+        a_html = "<a href='{}'>{}</a> ".format(html.escape(target), html.escape(name))
         anchors += a_html
 
     with open(source_file) as ifile:
@@ -380,7 +407,9 @@ def make_html(source_file):
 
     html_code = """<pre>{}</pre>
 {}
-    """.format(html.escape(textdata), anchors)
+    """.format(
+        html.escape(textdata), anchors
+    )
 
     with open(html_file, "w") as ofile:
         ofile.write(html_code)
@@ -389,10 +418,9 @@ def make_html(source_file):
 
 
 def handle_task(gh, args, config, task, dry_run=False):
-    title = f'{HOSTNAME}: {task.owner}/{task.repo}: pull #{task.pull} '
+    title = f"{HOSTNAME}: {task.owner}/{task.repo}: pull #{task.pull} "
     title += f'({task.head[:7]}) on {task.image["name"]}'
-    print('>>>', title)
-
+    print(">>>", title)
 
     if not dry_run:
         # When running multiple instances of this script, there's a race
@@ -407,54 +435,57 @@ def handle_task(gh, args, config, task, dry_run=False):
         # we wake up, we know that nobody else wants to do the same task and
         # can go ahead. Otherwise, choose something else.
 
-        gh.post(f'repos/{task.owner}/{task.repo}/statuses/{task.head}', {
-            'context': 'linux-system-roles-test/' + task.image['name'],
-            'state': 'pending',
-            'description': HOSTNAME
-        })
+        gh.post(
+            f"repos/{task.owner}/{task.repo}/statuses/{task.head}",
+            {
+                "context": "linux-system-roles-test/" + task.image["name"],
+                "state": "pending",
+                "description": HOSTNAME,
+            },
+        )
 
         time.sleep(random.randint(5, 20))
 
         statuses = get_statuses(gh, task.owner, task.repo, task.head)
-        status = statuses.get('linux-system-roles-test/' + task.image['name'])
-        if status['description'] != HOSTNAME:
-            print(f'Skip: another instance is working on this task: '
-                  + status['description'])
+        status = statuses.get("linux-system-roles-test/" + task.image["name"])
+        if status["description"] != HOSTNAME:
+            print(
+                f"Skip: another instance is working on this task: "
+                + status["description"]
+            )
             print()
             return
 
-    timestamp = datetime.datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+    timestamp = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
 
-    description = ''
+    description = ""
 
-    workdir = tempfile.mkdtemp(
-        prefix=f"linux-system-role-test-work-{task.id_}-")
-    artifactsdir = f'{workdir}/artifacts'
+    workdir = tempfile.mkdtemp(prefix=f"linux-system-role-test-work-{task.id_}-")
+    artifactsdir = f"{workdir}/artifacts"
     os.makedirs(artifactsdir)
 
-    with redirect_output(f'{artifactsdir}/test.log'):
+    with redirect_output(f"{artifactsdir}/test.log"):
         print(title)
-        print(len(title) * '=')
+        print(len(title) * "=")
         print()
         try:
             task.inventory = args.inventory
-            result = task.run(f'{artifactsdir}', args.cache,
-                              inventory=args.inventory)
+            result = task.run(f"{artifactsdir}", args.cache, inventory=args.inventory)
             if result:
-                state = 'success'
+                state = "success"
             elif result is None:
-                state = 'error'
-                description = 'Error running tests on ' + HOSTNAME
+                state = "error"
+                description = "Error running tests on " + HOSTNAME
             else:
-                state = 'failure'
+                state = "failure"
 
         # pylint: disable=broad-except,invalid-name
         except Exception as e:
             print(traceback.format_exc())
-            state = 'error'
-            description = 'Exception when running tests: ' + str(e)
+            state = "error"
+            description = "Exception when running tests: " + str(e)
 
-    run('chmod', 'a+rX', workdir)
+    run("chmod", "a+rX", workdir)
 
     local_test_log = f"{artifactsdir}/test.log"
 
@@ -466,117 +497,127 @@ def handle_task(gh, args, config, task, dry_run=False):
         make_html(local_test_log)
 
         if task.image.get("upload_results"):
-            results_destination = config['results']['destination']
-            results_url = config['results']['public_url']
-            results_dir = f'{task.owner}-{task.repo}-{task.id_}-{timestamp}'
+            results_destination = config["results"]["destination"]
+            results_url = config["results"]["public_url"]
+            results_dir = f"{task.owner}-{task.repo}-{task.id_}-{timestamp}"
 
-            if scp(workdir, f'{results_destination}/{results_dir}',
-                   args.secrets):
-                target_url = \
-                    f'{results_url}/{results_dir}/artifacts/test.log.html'
+            if scp(workdir, f"{results_destination}/{results_dir}", args.secrets):
+                target_url = f"{results_url}/{results_dir}/artifacts/test.log.html"
             else:
                 target_url = None
-                state = 'error'
+                state = "error"
         else:
             target_url = None
 
         # FIXME: workdir might be kept when python crashes
         shutil.rmtree(workdir)
 
-        gh.post(f'repos/{task.owner}/{task.repo}/statuses/{task.head}', {
-            'context': 'linux-system-roles-test/' + task.image['name'],
-            'state': state,
-            'target_url': target_url,
-            'description': description
-        })
+        gh.post(
+            f"repos/{task.owner}/{task.repo}/statuses/{task.head}",
+            {
+                "context": "linux-system-roles-test/" + task.image["name"],
+                "state": state,
+                "target_url": target_url,
+                "description": description,
+            },
+        )
     print()
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--secrets", default="/secrets",
-                        help="Directory with secrets")
-    parser.add_argument("--config", default="/config",
-                        help="Directory with config.json")
-    parser.add_argument("--cache", default="/cache",
-                        help="Directory for caching VM images")
+    parser.add_argument("--secrets", default="/secrets", help="Directory with secrets")
     parser.add_argument(
-        "--inventory", help="Inventory to use for VMs",
-        default='/usr/share/ansible/inventory/standard-inventory-qcow2')
-    parser.add_argument("pull_request", nargs="*", default=None,
-                        help="Pull requests to test. Example: "
-                        "linux-system-roles/network/1")
+        "--config", default="/config", help="Directory with config.json"
+    )
     parser.add_argument(
-        "--use-images", default="*",
-        help="Test pull request only against images matching this pattern")
+        "--cache", default="/cache", help="Directory for caching VM images"
+    )
+    parser.add_argument(
+        "--inventory",
+        help="Inventory to use for VMs",
+        default="/usr/share/ansible/inventory/standard-inventory-qcow2",
+    )
+    parser.add_argument(
+        "pull_request",
+        nargs="*",
+        default=None,
+        help="Pull requests to test. Example: " "linux-system-roles/network/1",
+    )
+    parser.add_argument(
+        "--use-images",
+        default="*",
+        help="Test pull request only against images matching this pattern",
+    )
     parser.add_argument(
         "--dry-run",
         help="Do not update pull request status or upload artifacts",
-        default=False, action="store_true")
+        default=False,
+        action="store_true",
+    )
 
     args = parser.parse_args()
 
     if args.dry_run:
         token = ""
     else:
-        with open(args.secrets + '/github-token') as f:
-            token = f.read().strip()
+        with open(args.secrets + "/github-token") as tokenfile:
+            token = tokenfile.read().strip()
 
-    with open(args.config + '/config.json') as f:
-        config = json.load(f)
-        images = config['images']
-        repos = [r.split('/') for r in config.get('repositories', [])]
+    with open(args.config + "/config.json") as configfile:
+        config = json.load(configfile)
+        images = config["images"]
+        repos = [r.split("/") for r in config.get("repositories", [])]
 
-    gh = Session('https://api.github.com')
-    gh.headers.update({
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'linux-system-roles/test',
-    })
+    gh = Session("https://api.github.com")
+    gh.headers.update(
+        {
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "linux-system-roles/test",
+        }
+    )
 
     if token:
-        gh.headers.update({
-            'Authorization': f'token {token}'
-        })
+        gh.headers.update({"Authorization": f"token {token}"})
 
     # Requests on keep-alive connections fail when the remote has closed a
     # connection before we've noticed and sent another request. Thus,
     # always retry sending requests once.
-    gh.mount('https://', requests.adapters.HTTPAdapter(max_retries=1))
+    gh.mount("https://", requests.adapters.HTTPAdapter(max_retries=1))
 
     printed_waiting = False
 
     for pull_request in args.pull_request:
         # supports to specify the PR with full URLs or just the path
         parsed_url = urllib.parse.urlparse(pull_request)
-        owner, repo, pullnr = parsed_url.strip("/").replace(
-            "/pull/", "/").split("/")
+        owner, repo, pullnr = parsed_url.strip("/").replace("/pull/", "/").split("/")
 
         head = parsed_url.fragment
         pull = gh.get(f"repos/{owner}/{repo}/pulls/{pullnr}").json()
 
         if not head:
-            head = pull['head']['sha']
-        number = pull['number']
+            head = pull["head"]["sha"]
+        number = pull["number"]
 
         image_patterns = args.use_images.split(",")
         test_images = []
         for pattern in image_patterns:
             for image in images:
-                if fnmatch.fnmatch(image["name"], pattern) or \
-                        fnmatch.fnmatch(image["source"], pattern):
-                    if not image in test_images:
+                if fnmatch.fnmatch(image["name"], pattern) or fnmatch.fnmatch(
+                    image["source"], pattern
+                ):
+                    if image not in test_images:
                         test_images.append(image)
 
         for image in test_images:
             task = Task(owner, repo, number, head, image)
             handle_task(gh, args, config, task, args.dry_run)
 
-
     while not args.pull_request:
         task = choose_task(gh, repos, images)
         if not task:
             if not printed_waiting:
-                print('>>> No tasks. Waiting.')
+                print(">>> No tasks. Waiting.")
                 printed_waiting = True
             time.sleep(600)
             continue
@@ -584,5 +625,5 @@ def main():
         handle_task(gh, args, config, task, args.dry_run)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

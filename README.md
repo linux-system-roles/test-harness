@@ -1,5 +1,7 @@
 Integration Tests for Linux System Roles
 ========================================
+[![Build Status](https://travis-ci.org/linux-system-roles/test-harness.svg?branch=master)](https://travis-ci.org/linux-system-roles/test-harness)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/ambv/black)
 
 A docker container which runs integration tests for open pull requests on
 [linux system roles](https://linux-system-roles.github.io) repositories. It runs
