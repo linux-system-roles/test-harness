@@ -52,7 +52,7 @@ class Session(requests.Session):
         return r
 
 
-class redirect_output:
+class redirect_output:  # pylint: disable=invalid-name
     """
     A context manager that redirects stdout and stderr to a file.
     """
@@ -60,22 +60,25 @@ class redirect_output:
     def __init__(self, filename, mode="w"):
         self.filename = filename
         self.mode = mode
+        self.redirect_file = None
+        self.oldout = None
+        self.olderr = None
 
     def __enter__(self):
-        self.f = open(self.filename, self.mode, buffering=1)
+        self.redirect_file = open(self.filename, self.mode, buffering=1)
         sys.stdout.flush()
         sys.stderr.flush()
 
         self.oldout = sys.stdout
         self.olderr = sys.stderr
 
-        sys.stdout = self.f
-        sys.stderr = self.f
+        sys.stdout = self.redirect_file
+        sys.stderr = self.redirect_file
 
-        return self.f
+        return self.redirect_file
 
     def __exit__(self, *exception):
-        self.f.close()
+        self.redirect_file.close()
 
         sys.stdout = self.oldout
         sys.stderr = self.olderr
@@ -111,30 +114,30 @@ def fetch_image(url, cache):
     Returns the full path to the image.
     """
 
-    fn = os.path.basename(urllib.parse.urlparse(url).path)
-    path = os.path.join(cache, fn)
+    image_name = os.path.basename(urllib.parse.urlparse(url).path)
+    path = os.path.join(cache, image_name)
 
     if not os.path.exists(path):
         print(f"Fetch {url}")
 
-        f = tempfile.NamedTemporaryFile(dir=cache, delete=False)
+        image_tempfile = tempfile.NamedTemporaryFile(dir=cache, delete=False)
         try:
             request = urllib.request.urlopen(url)
-            shutil.copyfileobj(request, f)
+            shutil.copyfileobj(request, image_tempfile)
             request.close()
-        except Exception:
+        except Exception:  # pylint: disable=broad-except
             logging.warning(traceback.format_exc())
-            os.unlink(f.name)
+            os.unlink(image_tempfile.name)
             return None
 
-        os.rename(f.name, path)
+        os.rename(image_tempfile.name, path)
     else:
-        print(f"Use cached {fn}")
+        print(f"Use cached {image_name}")
 
     return path
 
 
-class checkout_repository:
+class checkout_repository:  # pylint: disable=invalid-name
     """
     A context manager that shallowly checks out a github repository into a
     temporary directory.
@@ -329,7 +332,7 @@ def pull_ok_to_test(gh, owner, repo, pull, author, head):
         return True
 
 
-def get_statuses(gh, owner, repo, sha, prefix=""):
+def get_statuses(gh, owner, repo, sha):
     """
     Fetches all statuses of the given repository  and returns a dict mapping
     context to its most recent status.
@@ -380,6 +383,7 @@ def choose_task(gh, repos, images):
 
 
 def scp(source, destination, secrets):
+    """ Wrapper around scp to upload logs """
     result = run(
         "scp",
         "-o",
@@ -394,6 +398,7 @@ def scp(source, destination, secrets):
 
 
 def make_html(source_file):
+    """ Create simple html file with navigation links from test.log  """
     links = {"index": ".", "ansible log": "ansible.log"}
     html_file = source_file + ".html"
 
@@ -418,6 +423,7 @@ def make_html(source_file):
 
 
 def handle_task(gh, args, config, task, dry_run=False):
+    """ Process a task """
     title = f"{HOSTNAME}: {task.owner}/{task.repo}: pull #{task.pull} "
     title += f'({task.head[:7]}) on {task.image["name"]}'
     print(">>>", title)
