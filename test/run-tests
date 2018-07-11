@@ -339,6 +339,9 @@ def get_statuses(gh, owner, repo, sha):
 
     statuses = {}
     for status in gh.get(f"repos/{owner}/{repo}/statuses/{sha}").json():
+        # only add the first occurence of a context, since the result is in
+        # reverse chronological order:
+        # https://developer.github.com/v3/repos/statuses/#list-statuses-for-a-specific-ref
         statuses.setdefault(status["context"], status)
 
     return statuses
