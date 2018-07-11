@@ -58,7 +58,7 @@ accessible URL for these results. For example:
       "name": "fedora-27",
       "source": "https://download.fedoraproject.org/pub/fedora/linux/releases/27/CloudImages/x86_64/images/Fedora-Cloud-Base-27-1.6.x86_64.qcow2",
       "upload_results": true,
-      "setup": "sudo dnf install -yq python2 python2-dnf libselinux-python"
+      "setup": "dnf install -yv python2 python2-dnf libselinux-python"
     },
     {
       "name": "fedora-28",
@@ -71,7 +71,7 @@ accessible URL for these results. For example:
           "become": true,
           "gather_facts": false,
           "tasks": [
-            {"raw": "sudo dnf install -yq python2 python2-dnf libselinux-python"}
+            {"raw": "dnf install -yv python2 python2-dnf libselinux-python"}
           ]
         }
       ]
