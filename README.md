@@ -3,6 +3,28 @@ Integration Tests for Linux System Roles
 [![Build Status](https://travis-ci.org/linux-system-roles/test-harness.svg?branch=master)](https://travis-ci.org/linux-system-roles/test-harness)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/ambv/black)
 
+Commands
+--------
+
+The CI system can be controlled with a few commands as comments in pull requests:
+
+`[citest]`
+:    Trigger a re-test for all machines
+`[citest bad]`
+:    Trigger a re-test for all machines with an error or failure status
+`[citest pending]`
+:    Trigger a re-test for all machines with a pending status
+`[citest commit:<sha1>]`
+:    Whitelist a commit to be tested if the submitter is not trusted
+
+It is also possible to whitelist all commits in a PR with the `needs-ci` tag.
+However, this should be only used with trusted submitters since they can still
+change the commits in the PR.
+
+
+Installation
+------------
+
 A docker container which runs integration tests for open pull requests on
 [linux system roles](https://linux-system-roles.github.io) repositories. It runs
 all playbooks `test/test_*.yml` of the repository against various virtual
@@ -36,7 +58,7 @@ accessible URL for these results. For example:
       "name": "fedora-27",
       "source": "https://download.fedoraproject.org/pub/fedora/linux/releases/27/CloudImages/x86_64/images/Fedora-Cloud-Base-27-1.6.x86_64.qcow2",
       "upload_results": true,
-      "setup": "sudo dnf install -yq python2 python2-dnf libselinux-python"
+      "setup": "dnf install -yv python2 python2-dnf libselinux-python"
     },
     {
       "name": "fedora-28",
@@ -49,7 +71,7 @@ accessible URL for these results. For example:
           "become": true,
           "gather_facts": false,
           "tasks": [
-            {"raw": "sudo dnf install -yq python2 python2-dnf libselinux-python"}
+            {"raw": "dnf install -yv python2 python2-dnf libselinux-python"}
           ]
         }
       ]
