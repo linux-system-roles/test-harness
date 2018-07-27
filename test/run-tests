@@ -264,7 +264,7 @@ class Task:
 
             if not playbooks:
                 print(
-                    f"No test playbooks found, please add at least one"
+                    f"No test playbooks found, please add at least one "
                     f"playbook that matches {playbookglob}."
                 )
                 return None
