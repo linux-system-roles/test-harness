@@ -11,7 +11,7 @@ The CI system can be controlled with a few commands as comments in pull requests
 * `[citest]` - Trigger a re-test for all machines
 * `[citest bad]` - Trigger a re-test for all machines with an error or failure status
 * `[citest pending]` - Trigger a re-test for all machines with a pending status
-* `[citest commit<sha1>]` - Whitelist a commit to be tested if the submitter is not trusted
+* `[citest commit:<sha1>]` - Whitelist a commit to be tested if the submitter is not trusted
 
 It is also possible to whitelist all commits in a PR with the `needs-ci` tag.
 However, this should be only used with trusted submitters since they can still
