@@ -185,7 +185,7 @@ class Task:
         self.image = image
         self.inventory = "/usr/share/ansible/inventory/standard-inventory-qcow2"
 
-        self.id_ = f"pull-{self.pull}-{self.head[:7]}-" + self.image["name"]
+        self.id_ = f"pull-{owner}_{repo}-{pull}-{self.head[:7]}-" + image["name"]
 
     def run(self, artifactsdir, cachedir, inventory=None):
         """
