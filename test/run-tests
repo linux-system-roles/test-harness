@@ -185,7 +185,7 @@ class Task:
         self.image = image
         self.inventory = "/usr/share/ansible/inventory/standard-inventory-qcow2"
 
-        self.id_ = f"pull-{self.pull}-{self.head[:7]}-" + self.image["name"]
+        self.id_ = f"pull-{owner}_{repo}-{pull}-{self.head[:7]}-" + image["name"]
 
     def run(self, artifactsdir, cachedir, inventory=None):
         """
@@ -476,6 +476,8 @@ def handle_task(gh, args, config, task, dry_run=False):
     title += f'({task.head[:7]}) on {task.image["name"]}'
     print(">>>", title)
 
+    abort = False
+
     if not dry_run:
         # When running multiple instances of this script, there's a race
         # between choosing a task and setting the status on GitHub to "pending"
@@ -535,6 +537,12 @@ def handle_task(gh, args, config, task, dry_run=False):
 
         # pylint: disable=broad-except,invalid-name
         except Exception as e:
+            if isinstance(e, OSError):
+                # No space left on device
+                # pylint: disable=no-member
+                if e.errno == 28:
+                    abort = True
+
             print(traceback.format_exc())
             state = "error"
             description += ": Exception when running tests: " + str(e)
@@ -577,6 +585,10 @@ def handle_task(gh, args, config, task, dry_run=False):
             },
         )
     print()
+
+    if abort:
+        print("Fatal exception occured, aborting...")
+        sys.exit(1)
 
 
 def main():
