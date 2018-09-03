@@ -202,8 +202,6 @@ class Task:
         with checkout_repository(
             self.owner, self.repo, f"pull/{self.pull}/head"
         ) as sourcedir:
-            setup_file = None
-
             # Generate a playbook with a single raw task to setup the image
             # (this usually means installing python2 on the guest for ansible)
             setup_file = os.path.join(sourcedir, "_setup.yml")
@@ -283,7 +281,8 @@ class Task:
                         "ansible-playbook",
                         "-vv",
                         f"--inventory={inventory}",
-                        *(setup_file, playbook),
+                        setup_file,
+                        playbook,
                         env={
                             "TEST_SUBJECTS": image_path,
                             "TEST_ARTIFACTS": artifactsdir,
