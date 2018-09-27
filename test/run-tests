@@ -84,7 +84,7 @@ class redirect_output:  # pylint: disable=invalid-name
         sys.stderr = self.olderr
 
 
-def run(*argv, env=None, check=True):
+def run(*argv, env=None, check=True, cwd=None):
     """
     Small wrapper around subprocess.run(), which prints the command to be
     executed and raises an exception by default.
@@ -101,7 +101,7 @@ def run(*argv, env=None, check=True):
     print("+ " + envrepr + " ".join(shlex.quote(a) for a in argv))
 
     return subprocess.run(
-        argv, env=runenv, check=check, stdout=sys.stdout, stderr=sys.stderr
+        argv, env=runenv, check=check, stdout=sys.stdout, stderr=sys.stderr, cwd=cwd
     )
 
 
@@ -288,6 +288,7 @@ class Task:
                             "TEST_ARTIFACTS": artifactsdir,
                         },
                         check=False,
+                        cwd=os.path.dirname(playbook),
                     )
 
                 if result.returncode != 0:
