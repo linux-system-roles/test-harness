@@ -94,8 +94,11 @@ The `setup` key contains either a list of Ansible plays which will be saved as a
 
 The container needs a `/secrets` mount, which must contain these files:
 
-* `github-token`: A GitHub access token with `public_repo` and `repo:status`
-  rights.
+* `github-token`: A GitHub access token with `public_repo`, `repo:status` and
+  `read:org` scopes. The `read:org` permission is required to identify users as
+  members to organiziations in case they set their organization membership to
+  private. Without it, the test harness can still update CI status but might
+  ignore pull requests or command comments unexpectedly.
 * `is_rsa` and `id_rsa.pub`: A ssh key with to access the server in
   `results.destination`.
 * `known_hosts`: A ssh `known_hosts` file which contains the public key of that
