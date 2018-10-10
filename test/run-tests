@@ -327,7 +327,7 @@ def pull_ok_to_test(gh, owner, repo, pull, author, head):
                 return True
 
     result = gh.get(f"repos/{owner}/{repo}/issues/{pull}/labels")
-    if result.status_code == 200 and "needs-ci" in result.json():
+    if result.status_code == 200 and "needs-ci" in (x["name"] for x in result.json()):
         return True
 
 
