@@ -95,10 +95,12 @@ def run(*argv, env=None, check=True, cwd=None):
     else:
         envrepr = ""
 
+    cwdrepr = "cd {}; ".format(shlex.quote(cwd)) if cwd else ""
+
     if env:
         runenv.update(env)
 
-    print("+ " + envrepr + " ".join(shlex.quote(a) for a in argv))
+    print("+ " + cwdrepr + envrepr + " ".join(shlex.quote(a) for a in argv))
 
     return subprocess.run(
         argv, env=runenv, check=check, stdout=sys.stdout, stderr=sys.stderr, cwd=cwd
