@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import random
+import signal
 import shlex
 import shutil
 import socket
@@ -25,6 +26,11 @@ import requests
 import yaml
 
 HOSTNAME = socket.gethostname()
+
+
+def sighandler_exit(signo, frame):
+    print(f"Received {signal.Signals(signo).name}, exiting...", file=sys.stderr)
+    sys.exit(0)
 
 
 class Session(requests.Session):
@@ -480,6 +486,10 @@ def handle_task(gh, args, config, task, dry_run=False):
 
     abort = False
 
+    description = HOSTNAME
+    target_url = None
+    state = None
+
     if not dry_run:
         # When running multiple instances of this script, there's a race
         # between choosing a task and setting the status on GitHub to "pending"
@@ -502,90 +512,98 @@ def handle_task(gh, args, config, task, dry_run=False):
             },
         )
 
-        time.sleep(random.randint(5, 20))
+    try:
+        if not dry_run:
+            time.sleep(random.randint(5, 20))
 
-        statuses = get_statuses(gh, task.owner, task.repo, task.head)
-        status = statuses.get("linux-system-roles-test/" + task.image["name"])
-        if status["description"] != HOSTNAME:
-            print(
-                f"Skip: another instance is working on this task: "
-                + status["description"]
-            )
+            statuses = get_statuses(gh, task.owner, task.repo, task.head)
+            status = statuses.get("linux-system-roles-test/" + task.image["name"])
+            if status["description"] != HOSTNAME:
+                print(
+                    f"Skip: another instance is working on this task: "
+                    + status["description"]
+                )
+                print()
+                # avoid overwriting status from another instance
+                dry_run = True
+                return
+
+        timestamp = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+
+        workdir = tempfile.mkdtemp(prefix=f"linux-system-role-test-work-{task.id_}-")
+        artifactsdir = f"{workdir}/artifacts"
+        os.makedirs(artifactsdir)
+
+        with redirect_output(f"{artifactsdir}/test.log"):
+            print(title)
+            print(len(title) * "=")
             print()
-            return
+            try:
+                task.inventory = args.inventory
+                result = task.run(
+                    f"{artifactsdir}", args.cache, inventory=args.inventory
+                )
+                if result:
+                    state = "success"
+                elif result is None:
+                    state = "error"
+                    description += ": Error running tests"
+                else:
+                    state = "failure"
 
-    timestamp = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+            # Do not handle these exceptions
+            except (KeyboardInterrupt, SystemExit):
+                raise
 
-    description = HOSTNAME
+            # pylint: disable=broad-except,invalid-name
+            except Exception as e:
+                if isinstance(e, OSError):
+                    # No space left on device
+                    # pylint: disable=no-member
+                    if e.errno == 28:
+                        abort = True
 
-    workdir = tempfile.mkdtemp(prefix=f"linux-system-role-test-work-{task.id_}-")
-    artifactsdir = f"{workdir}/artifacts"
-    os.makedirs(artifactsdir)
-
-    with redirect_output(f"{artifactsdir}/test.log"):
-        print(title)
-        print(len(title) * "=")
-        print()
-        try:
-            task.inventory = args.inventory
-            result = task.run(f"{artifactsdir}", args.cache, inventory=args.inventory)
-            if result:
-                state = "success"
-            elif result is None:
+                print(traceback.format_exc())
                 state = "error"
-                description += ": Error running tests"
-            else:
-                state = "failure"
+                description += ": Exception when running tests: " + str(e)
 
-        # pylint: disable=broad-except,invalid-name
-        except Exception as e:
-            if isinstance(e, OSError):
-                # No space left on device
-                # pylint: disable=no-member
-                if e.errno == 28:
-                    abort = True
+        run("chmod", "a+rX", workdir)
 
-            print(traceback.format_exc())
-            state = "error"
-            description += ": Exception when running tests: " + str(e)
+        local_test_log = f"{artifactsdir}/test.log"
 
-    run("chmod", "a+rX", workdir)
-
-    local_test_log = f"{artifactsdir}/test.log"
-
-    if dry_run:
-        print(f"Artifacts kept at: {artifactsdir}")
-        with open(local_test_log) as test_log:
-            print(test_log.read())
-    else:
-        make_html(local_test_log)
-
-        if task.image.get("upload_results"):
-            results_destination = config["results"]["destination"]
-            results_url = config["results"]["public_url"]
-            results_dir = f"{task.owner}-{task.repo}-{task.id_}-{timestamp}"
-
-            if scp(workdir, f"{results_destination}/{results_dir}", args.secrets):
-                target_url = f"{results_url}/{results_dir}/artifacts/test.log.html"
-            else:
-                target_url = None
-                state = "error"
-                description += ": Error uploading results"
+        if dry_run:
+            print(f"Artifacts kept at: {artifactsdir}")
+            with open(local_test_log) as test_log:
+                print(test_log.read())
         else:
-            target_url = None
+            make_html(local_test_log)
 
-        # FIXME: workdir might be kept when python crashes
-        shutil.rmtree(workdir)
+            if task.image.get("upload_results"):
+                results_destination = config["results"]["destination"]
+                results_url = config["results"]["public_url"]
+                results_dir = f"{task.owner}-{task.repo}-{task.id_}-{timestamp}"
 
-        gh.post(
-            f"repos/{task.owner}/{task.repo}/statuses/{task.head}",
-            {
-                "context": "linux-system-roles-test/" + task.image["name"],
-                "state": state,
-                "target_url": target_url,
-                "description": description,
-            },
-        )
+                if scp(workdir, f"{results_destination}/{results_dir}", args.secrets):
+                    target_url = f"{results_url}/{results_dir}/artifacts/test.log.html"
+                else:
+                    state = "error"
+                    description += ": Error uploading results"
+
+            # FIXME: workdir might be kept when python crashes
+            shutil.rmtree(workdir)
+
+    finally:
+        if not dry_run:
+            gh.post(
+                f"repos/{task.owner}/{task.repo}/statuses/{task.head}",
+                {
+                    "context": "linux-system-roles-test/" + task.image["name"],
+                    "state": state or "pending",
+                    "target_url": target_url,
+                    "description": description if state and state != "pending" else "",
+                },
+            )
+
     print()
 
     if abort:
@@ -594,6 +612,8 @@ def handle_task(gh, args, config, task, dry_run=False):
 
 
 def main():
+    signal.signal(signal.SIGTERM, sighandler_exit)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--secrets", default="/secrets", help="Directory with secrets")
     parser.add_argument(
