@@ -1,54 +1,36 @@
 apiVersion: v1
 kind: List
 items:
-  - kind: ServiceAccount
-    apiVersion: v1
-    metadata:
-      name: tester
-  - kind: ImageStream
-    apiVersion: v1
-    metadata:
-      name: linux-system-roles
-    spec:
-      tags:
-        - name: latest
-          from:
-            kind: DockerImage
-            name: docker.io/linuxsystemroles/test-harness
-        - name: staging
-          from:
-            kind: DockerImage
-            name: docker.io/linuxsystemroles/test-harness:staging
   - kind: DeploymentConfig
     apiVersion: v1
     metadata:
-      name: linux-system-roles
+      name: linux-system-roles-staging
     spec:
       replicas: 1
       selector:
-        name: linux-system-roles
+        name: linux-system-roles-staging
       triggers:
         - type: ConfigChange
         - type: ImageChange
           imageChangeParams:
             automatic: true
             containerNames:
-              - linux-system-roles
+              - linux-system-roles-staging
             from:
               kind: ImageStreamTag
-              name: linux-system-roles:latest
+              name: linux-system-roles:staging
       strategy:
         type: Rolling
       template:
         metadata:
           labels:
-            name: linux-system-roles
+            name: linux-system-roles-staging
         spec:
           serviceAccountName: tester
           restartPolicy: Always
           containers:
-            - name: linux-system-roles
-              image: docker.io/linuxsystemroles/test-harness
+            - name: linux-system-roles-staging
+              image: docker.io/linuxsystemroles/test-harness:staging
               volumeMounts:
                 - name: secrets
                   mountPath: /secrets
@@ -67,6 +49,6 @@ items:
                 secretName: secrets
             - name: config
               configMap:
-                name: config
+                name: config-staging
             - name: cache
               emptyDir:
