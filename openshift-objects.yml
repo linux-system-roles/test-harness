@@ -8,43 +8,43 @@ items:
   - kind: ImageStream
     apiVersion: v1
     metadata:
-      name: linux-system-roles-test
+      name: linux-system-roles
     spec:
       tags:
         - name: latest
           from:
             kind: DockerImage
-            name: docker.io/larskarlitski/linux-system-roles-test
+            name: docker.io/linuxsystemroles/test-harness
   - kind: DeploymentConfig
     apiVersion: v1
     metadata:
-      name: linux-system-roles-test
+      name: linux-system-roles
     spec:
       replicas: 1
       selector:
-        name: linux-system-roles-test
+        name: linux-system-roles
       triggers:
         - type: ConfigChange
         - type: ImageChange
           imageChangeParams:
             automatic: true
             containerNames:
-              - linux-system-roles-test
+              - linux-system-roles
             from:
               kind: ImageStreamTag
-              name: linux-system-roles-test:latest
+              name: linux-system-roles:latest
       strategy:
         type: Rolling
       template:
         metadata:
           labels:
-            name: linux-system-roles-test
+            name: linux-system-roles
         spec:
           serviceAccountName: tester
           restartPolicy: Always
           containers:
-            - name: linux-system-roles-test
-              image: docker.io/larskarlitski/linux-system-roles-test
+            - name: linux-system-roles
+              image: docker.io/linuxsystemroles/test-harness
               volumeMounts:
                 - name: secrets
                   mountPath: /secrets
