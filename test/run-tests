@@ -714,6 +714,16 @@ def handle_task(gh, args, config, task, dry_run=False):
         sys.exit(1)
 
 
+def check_environment():
+    """
+    Check whether the environment is sane.
+    Intent here is to fail early for example if /dev/kvm is not available.
+    """
+    if not os.access("/dev/kvm", os.R_OK | os.W_OK):
+        print("test-harness needs access to /dev/kvm, aborting")
+        sys.exit(1)
+
+
 def main():
     signal.signal(signal.SIGTERM, sighandler_exit)
 
@@ -749,6 +759,8 @@ def main():
     )
 
     args = parser.parse_args()
+
+    check_environment()
 
     if args.dry_run:
         token = ""
