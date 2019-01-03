@@ -38,6 +38,36 @@ def sighandler_exit(signo, frame):
     sys.exit(0)
 
 
+def handle_transient_httperrors(error):
+    """
+    Sleep when a transient error occured.
+
+    Return True if slept, False otherwise
+    """
+
+    # Handle transient server-side errors
+    if error.response.status_code in (500, 502, 503, 504):
+        print(
+            ">>> Server returned {} {}, waiting...".format(
+                error.response.status_code, error.response.reason
+            )
+        )
+        time.sleep(600)
+    # Handle rate limiting
+    elif (
+        error.response.status_code == 403
+        and "X-RateLimit-Remaining" in error.response.headers
+        and int(error.response.headers["X-RateLimit-Remaining"]) == 0
+    ):
+        timeout = int(error.response.headers["X-RateLimit-Reset"]) - time.time()
+        print(f">>> Rate limiting hit, waiting for {int(timeout)} seconds...")
+        time.sleep(timeout)
+    else:
+        return False
+
+    return True
+
+
 class Session(requests.Session):
     """
     A small extension for requests.Session that saves typing the host, calls
@@ -616,16 +646,23 @@ def handle_task(gh, args, config, task, dry_run=False):
             shutil.rmtree(workdir)
 
     finally:
-        if not dry_run:
-            gh.post(
-                f"repos/{task.owner}/{task.repo}/statuses/{task.head}",
-                {
-                    "context": "linux-system-roles-test/" + task.image["name"],
-                    "state": state or "pending",
-                    "target_url": target_url,
-                    "description": description if state and state != "pending" else "",
-                },
-            )
+        while not dry_run:
+            try:
+                gh.post(
+                    f"repos/{task.owner}/{task.repo}/statuses/{task.head}",
+                    {
+                        "context": "linux-system-roles-test/" + task.image["name"],
+                        "state": state or "pending",
+                        "target_url": target_url,
+                        "description": description
+                        if state and state != "pending"
+                        else "",
+                    },
+                )
+                break
+            except requests.exceptions.HTTPError as err:
+                if not handle_transient_httperrors(err):
+                    raise
 
     print()
 
@@ -728,15 +765,19 @@ def main():
             handle_task(gh, args, config, task, args.dry_run)
 
     while not args.pull_request:
-        task = choose_task(gh, repos, images)
-        if not task:
-            if not printed_waiting:
-                print(">>> No tasks. Waiting.")
-                printed_waiting = True
-            time.sleep(600)
-            continue
+        try:
+            task = choose_task(gh, repos, images)
+            if not task:
+                if not printed_waiting:
+                    print(">>> No tasks. Waiting.")
+                    printed_waiting = True
+                time.sleep(600)
+                continue
 
-        handle_task(gh, args, config, task, args.dry_run)
+            handle_task(gh, args, config, task, args.dry_run)
+        except requests.exceptions.HTTPError as err:
+            if not handle_transient_httperrors(err):
+                raise
 
 
 if __name__ == "__main__":
