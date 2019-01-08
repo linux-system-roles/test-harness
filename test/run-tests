@@ -28,6 +28,10 @@ import yaml
 
 HOSTNAME = socket.gethostname()
 
+COMMENT_CMD_TEST_ALL = "[citest]"
+COMMENT_CMD_TEST_PENDING = "[citest pending]"
+COMMENT_CMD_TEST_BAD = "[citest bad]"
+
 
 def sighandler_exit(signo, frame):
     print(f"Received {signal.Signals(signo).name}, exiting...", file=sys.stderr)
@@ -373,6 +377,23 @@ def get_comments(gh, owner, repo, pullnr, after=""):
     return comments
 
 
+def get_comment_commands(gh, owner, repo, pullnr):
+    """ Returns dict with last occurence of each command """
+    commands = {
+        COMMENT_CMD_TEST_ALL: "",
+        COMMENT_CMD_TEST_BAD: "",
+        COMMENT_CMD_TEST_PENDING: "",
+    }
+    comments = get_comments(gh, owner, repo, pullnr)
+
+    for comment in comments:
+        for command in commands:
+            if command in comment["body"] and commands[command] < comment["updated_at"]:
+                commands[command] = comment["updated_at"]
+
+    return commands
+
+
 def choose_task(gh, repos, images):
     """
     Collect tasks from open pull requests (one task for each image
@@ -395,10 +416,12 @@ def choose_task(gh, repos, images):
                 continue
 
             statuses = get_statuses(gh, owner, repo, head)
+            commands = get_comment_commands(gh, owner, repo, number)
+
             for image in images:
                 status = statuses.get("linux-system-roles-test/" + image["name"])
 
-                if check_commit_needs_testing(gh, status, owner, repo, number):
+                if check_commit_needs_testing(status, commands):
                     task = Task(owner, repo, number, head, image)
                     tasks.append(task)
 
@@ -406,8 +429,9 @@ def choose_task(gh, repos, images):
         return random.choice(tasks)
 
 
-def check_commit_needs_testing(gh, status, owner, repo, pullnr):
+def check_commit_needs_testing(status, commands):
     """ Check if commit needs to be checked """
+
     # Check it, if there's no status for it yet
     if not status:
         return True
@@ -416,25 +440,23 @@ def check_commit_needs_testing(gh, status, owner, repo, pullnr):
     if status["state"] == "pending" and not status.get("description"):
         return True
 
-    last_status_update = status["updated_at"]
-    comments = get_comments(gh, owner, repo, pullnr, after=last_status_update)
-
     # or a generic re-check was requested:
-    for comment in comments:
-        if "[citest]" in comment["body"]:
-            return True
+    if status["updated_at"] < commands[COMMENT_CMD_TEST_ALL]:
+        return True
 
     # or the status is error or failure and a re-check was requested
-    if status["state"] == "error" or status["state"] == "failure":
-        for comment in comments:
-            if "[citest bad]" in comment["body"]:
-                return True
+    if (
+        status["state"] in ("failure", "error")
+        and status["updated_at"] < commands[COMMENT_CMD_TEST_BAD]
+    ):
+        return True
 
     # or the status is pending and a re-check was requested
-    if status["state"] == "pending":
-        for comment in comments:
-            if "[citest pending]" in comment["body"]:
-                return True
+    if (
+        status["state"] == "pending"
+        and status["updated_at"] < commands[COMMENT_CMD_TEST_PENDING]
+    ):
+        return True
 
     return False
 
