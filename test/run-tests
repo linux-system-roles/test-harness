@@ -23,6 +23,7 @@ import urllib.parse
 import urllib.request
 
 import requests
+import cachecontrol
 import yaml
 
 HOSTNAME = socket.gethostname()
@@ -658,7 +659,7 @@ def main():
         images = config["images"]
         repos = [r.split("/") for r in config.get("repositories", [])]
 
-    gh = Session("https://api.github.com")
+    gh = cachecontrol.CacheControl(Session("https://api.github.com"))
     gh.headers.update(
         {
             "Accept": "application/vnd.github.v3+json",
