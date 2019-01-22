@@ -32,6 +32,15 @@ COMMENT_CMD_TEST_ALL = "[citest]"
 COMMENT_CMD_TEST_PENDING = "[citest pending]"
 COMMENT_CMD_TEST_BAD = "[citest bad]"
 
+TRANSIENT_ERROR_WAIT_TIME_DEFAULT = 30
+TRANSIENT_ERROR_WAIT_TIME_MAX = 600
+transient_error_wait_time = TRANSIENT_ERROR_WAIT_TIME_DEFAULT
+
+
+def reset_transient_error_wait_time():
+    global transient_error_wait_time
+    transient_error_wait_time = TRANSIENT_ERROR_WAIT_TIME_DEFAULT
+
 
 def sighandler_exit(signo, frame):
     print(f"Received {signal.Signals(signo).name}, exiting...", file=sys.stderr)
@@ -47,12 +56,18 @@ def handle_transient_httperrors(error):
 
     # Handle transient server-side errors
     if error.response.status_code in (500, 502, 503, 504):
+        global transient_error_wait_time
         print(
-            ">>> Server returned {} {}, waiting...".format(
-                error.response.status_code, error.response.reason
+            ">>> Server returned {} {}, waiting {} s...".format(
+                error.response.status_code,
+                error.response.reason,
+                transient_error_wait_time,
             )
         )
-        time.sleep(600)
+        time.sleep(transient_error_wait_time)
+        transient_error_wait_time = min(
+            transient_error_wait_time * 2, TRANSIENT_ERROR_WAIT_TIME_MAX
+        )
     # Handle rate limiting
     elif (
         error.response.status_code == 403
@@ -84,12 +99,16 @@ class Session(requests.Session):
         r = super().post(f"{self.host}/{path}", json=json_, timeout=self.timeout)
         if check:
             r.raise_for_status()
+        if r.ok:
+            reset_transient_error_wait_time()
         return r
 
     def get(self, path, check=True):
         r = super().get(f"{self.host}/{path}", timeout=self.timeout)
         if check:
             r.raise_for_status()
+        if r.ok:
+            reset_transient_error_wait_time()
         return r
 
 
