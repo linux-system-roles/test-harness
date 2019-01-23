@@ -4,6 +4,7 @@ RUN dnf update -y && dnf install -y \
     ansible \
     git \
     python3-requests \
+    python3-CacheControl \
     standard-test-roles && dnf clean all
 
 RUN useradd -m tester
