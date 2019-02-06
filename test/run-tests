@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import calendar
 import traceback
 import urllib.parse
 import urllib.request
@@ -79,10 +80,25 @@ def handle_transient_httperrors(error):
         and "X-RateLimit-Remaining" in error.response.headers
         and int(error.response.headers["X-RateLimit-Remaining"]) == 0
     ):
+        try:
+            now = calendar.timegm(
+                time.strptime(
+                    error.response.headers["Date"], "%a, %d %b %Y %H:%M:%S %Z"
+                )
+            )
+        except ValueError as e:
+            print(
+                'W: Failed to parse date "{}" from headers: {}'.format(
+                    error.response.headers["Date"], e
+                )
+            )
+            now = time.time()
+
         timeout = max(
-            int(error.response.headers["X-RateLimit-Reset"]) - time.time(),
+            int(error.response.headers["X-RateLimit-Reset"]) - now,
             transient_error_wait_time.next(),
         )
+
         print(f">>> Rate limiting hit, waiting for {int(timeout)} seconds...")
         time.sleep(timeout)
     else:
