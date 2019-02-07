@@ -79,7 +79,10 @@ def handle_transient_httperrors(error):
         and "X-RateLimit-Remaining" in error.response.headers
         and int(error.response.headers["X-RateLimit-Remaining"]) == 0
     ):
-        timeout = int(error.response.headers["X-RateLimit-Reset"]) - time.time()
+        timeout = max(
+            int(error.response.headers["X-RateLimit-Reset"]) - time.time(),
+            transient_error_wait_time.next(),
+        )
         print(f">>> Rate limiting hit, waiting for {int(timeout)} seconds...")
         time.sleep(timeout)
     else:
