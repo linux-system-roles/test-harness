@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import calendar
 import traceback
 import urllib.parse
 import urllib.request
@@ -32,14 +33,24 @@ COMMENT_CMD_TEST_ALL = "[citest]"
 COMMENT_CMD_TEST_PENDING = "[citest pending]"
 COMMENT_CMD_TEST_BAD = "[citest bad]"
 
-TRANSIENT_ERROR_WAIT_TIME_DEFAULT = 30
-TRANSIENT_ERROR_WAIT_TIME_MAX = 600
-transient_error_wait_time = TRANSIENT_ERROR_WAIT_TIME_DEFAULT
+
+class TransientErrorWaitTime:
+    TIME_DEFAULT = 30
+    TIME_MAX = 600
+
+    def __init__(self):
+        self._value = self.TIME_DEFAULT
+
+    def reset(self):
+        self._value = self.TIME_DEFAULT
+
+    def next(self):
+        ret = self._value
+        self._value = min(self._value * 2, self.TIME_MAX)
+        return ret
 
 
-def reset_transient_error_wait_time():
-    global transient_error_wait_time
-    transient_error_wait_time = TRANSIENT_ERROR_WAIT_TIME_DEFAULT
+transient_error_wait_time = TransientErrorWaitTime()
 
 
 def sighandler_exit(signo, frame):
@@ -56,25 +67,38 @@ def handle_transient_httperrors(error):
 
     # Handle transient server-side errors
     if error.response.status_code in (500, 502, 503, 504):
-        global transient_error_wait_time
+        timeout = transient_error_wait_time.next()
         print(
             ">>> Server returned {} {}, waiting {} s...".format(
-                error.response.status_code,
-                error.response.reason,
-                transient_error_wait_time,
+                error.response.status_code, error.response.reason, timeout
             )
         )
-        time.sleep(transient_error_wait_time)
-        transient_error_wait_time = min(
-            transient_error_wait_time * 2, TRANSIENT_ERROR_WAIT_TIME_MAX
-        )
+        time.sleep(timeout)
     # Handle rate limiting
     elif (
         error.response.status_code == 403
         and "X-RateLimit-Remaining" in error.response.headers
         and int(error.response.headers["X-RateLimit-Remaining"]) == 0
     ):
-        timeout = int(error.response.headers["X-RateLimit-Reset"]) - time.time()
+        try:
+            now = calendar.timegm(
+                time.strptime(
+                    error.response.headers["Date"], "%a, %d %b %Y %H:%M:%S %Z"
+                )
+            )
+        except ValueError as e:
+            print(
+                'W: Failed to parse date "{}" from headers: {}'.format(
+                    error.response.headers["Date"], e
+                )
+            )
+            now = time.time()
+
+        timeout = max(
+            int(error.response.headers["X-RateLimit-Reset"]) - now,
+            transient_error_wait_time.next(),
+        )
+
         print(f">>> Rate limiting hit, waiting for {int(timeout)} seconds...")
         time.sleep(timeout)
     else:
@@ -100,7 +124,7 @@ class Session(requests.Session):
         if check:
             r.raise_for_status()
         if r.ok:
-            reset_transient_error_wait_time()
+            transient_error_wait_time.reset()
         return r
 
     def get(self, path, check=True):
@@ -108,7 +132,7 @@ class Session(requests.Session):
         if check:
             r.raise_for_status()
         if r.ok:
-            reset_transient_error_wait_time()
+            transient_error_wait_time.reset()
         return r
 
 
