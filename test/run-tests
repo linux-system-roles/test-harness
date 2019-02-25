@@ -467,7 +467,7 @@ def get_comment_commands(gh, owner, repo, pullnr):
     return commands
 
 
-def choose_task(gh, repos, images):
+def choose_task(gh, repos, images, config):
     """
     Collect tasks from open pull requests (one task for each image
     and each open pull).
@@ -492,7 +492,8 @@ def choose_task(gh, repos, images):
             commands = get_comment_commands(gh, owner, repo, number)
 
             for image in images:
-                status = statuses.get("linux-system-roles-test/" + image["name"])
+                status_context = f"{config['name']}/{image['name']}"
+                status = statuses.get(status_context)
 
                 if check_commit_needs_testing(status, commands):
                     task = Task(owner, repo, number, head, image)
@@ -586,6 +587,8 @@ def handle_task(gh, args, config, task, dry_run=False):
     target_url = None
     state = None
 
+    status_context = f"{config['name']}/{task.image['name']}"
+
     if not dry_run:
         # When running multiple instances of this script, there's a race
         # between choosing a task and setting the status on GitHub to "pending"
@@ -601,11 +604,7 @@ def handle_task(gh, args, config, task, dry_run=False):
 
         gh.post(
             f"repos/{task.owner}/{task.repo}/statuses/{task.head}",
-            {
-                "context": "linux-system-roles-test/" + task.image["name"],
-                "state": "pending",
-                "description": HOSTNAME,
-            },
+            {"context": status_context, "state": "pending", "description": HOSTNAME},
         )
 
     try:
@@ -613,7 +612,7 @@ def handle_task(gh, args, config, task, dry_run=False):
             time.sleep(random.randint(5, 20))
 
             statuses = get_statuses(gh, task.owner, task.repo, task.head)
-            status = statuses.get("linux-system-roles-test/" + task.image["name"])
+            status = statuses.get(status_context)
             if status["description"] != HOSTNAME:
                 print(
                     f"Skip: another instance is working on this task: "
@@ -694,7 +693,7 @@ def handle_task(gh, args, config, task, dry_run=False):
                 gh.post(
                     f"repos/{task.owner}/{task.repo}/statuses/{task.head}",
                     {
-                        "context": "linux-system-roles-test/" + task.image["name"],
+                        "context": status_context,
                         "state": state or "pending",
                         "target_url": target_url,
                         "description": description
@@ -711,6 +710,16 @@ def handle_task(gh, args, config, task, dry_run=False):
 
     if abort:
         print("Fatal exception occured, aborting...")
+        sys.exit(1)
+
+
+def check_environment():
+    """
+    Check whether the environment is sane.
+    Intent here is to fail early for example if /dev/kvm is not available.
+    """
+    if not os.access("/dev/kvm", os.R_OK | os.W_OK):
+        print("test-harness needs access to /dev/kvm, aborting")
         sys.exit(1)
 
 
@@ -750,14 +759,19 @@ def main():
 
     args = parser.parse_args()
 
+    check_environment()
+
     if args.dry_run:
         token = ""
     else:
         with open(args.secrets + "/github-token") as tokenfile:
             token = tokenfile.read().strip()
 
+    # default values for config
+    config = {"repositories": [], "images": [], "name": "linux-system-roles-test"}
+
     with open(args.config + "/config.json") as configfile:
-        config = json.load(configfile)
+        config.update(json.load(configfile))
         images = config["images"]
         repos = [r.split("/") for r in config.get("repositories", [])]
 
@@ -809,7 +823,7 @@ def main():
 
     while not args.pull_request:
         try:
-            task = choose_task(gh, repos, images)
+            task = choose_task(gh, repos, images, config)
             if not task:
                 if not printed_waiting:
                     print(">>> No tasks. Waiting.")
