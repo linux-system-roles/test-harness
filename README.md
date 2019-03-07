@@ -118,14 +118,15 @@ add the `ServiceAccount`, `ImageStream`, and `DeploymentConfig` from
     oc new-project linux-system-roles-test
     oc create -f openshift-objects.yml
 
-The service account needs to be in the privileged scc. Edit it with
+The service account needs to be in the privileged scc.
+If you have appropriate permissions, you can edit it with
 
     oc edit scc privileged
 
 and add `- system:serviceaccount:linux-system-roles:tester` under `users`.
 
 Also, create a `config.json` and a directory containing the secrets mentioned
-above, and add `ConfigMap` and `Secrect` objects with:
+above, and add `ConfigMap` and `Secret` objects with:
 
     oc create configmap config --from-file=config.json
     oc create secret generic secrets --from-file=path/to/secrets
