@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: List
+items:
+  - kind: DeploymentConfig
+    apiVersion: v1
+    metadata:
+      name: linux-system-roles
+    spec:
+      replicas: 1
+      selector:
+        name: linux-system-roles
+      triggers:
+        - type: ConfigChange
+        - type: ImageChange
+          imageChangeParams:
+            automatic: true
+            containerNames:
+              - linux-system-roles
+            from:
+              kind: ImageStreamTag
+              name: linux-system-roles:latest
+      strategy:
+        type: Rolling
+      template:
+        metadata:
+          labels:
+            name: linux-system-roles
+        spec:
+          serviceAccountName: tester
+          restartPolicy: Always
+          securityContext:
+            runAsUser: 0
+          containers:
+            - name: linux-system-roles
+              image: docker.io/linuxsystemroles/test-harness
+              volumeMounts:
+                - name: secrets
+                  mountPath: /secrets
+                  readOnly: true
+                - name: config
+                  mountPath: /config
+                  readOnly: true
+                - name: cache
+                  mountPath: /cache
+              securityContext:
+                privileged: true
+          volumes:
+            - name: secrets
+              secret:
+                defaultMode: 0400
+                secretName: secrets
+            - name: config
+              configMap:
+                defaultMode: 0644
+                name: config
+            - name: cache
+              emptyDir:

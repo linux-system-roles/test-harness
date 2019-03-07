@@ -106,7 +106,7 @@ The container needs a `/secrets` mount, which must contain these files:
 
 The test runner writes images into the `/cache` mount and reuses existing ones.
 
-The container should have access to `/dev/kvm/` for fast virtualization.
+The container must have access to `/dev/kvm` for fast virtualization.
 
 
 ## Running on OpenShift
@@ -118,12 +118,17 @@ add the `ServiceAccount`, `ImageStream`, and `DeploymentConfig` from
     oc new-project linux-system-roles-test
     oc create -f openshift-objects.yml
 
-The service account needs to be in the privileged scc.
-If you have appropriate permissions, you can edit it with
+The service account needs to be in the privileged scc. If you have appropriate
+permissions, you can edit it with
 
     oc edit scc privileged
 
 and add `- system:serviceaccount:linux-system-roles:tester` under `users`.
+
+If you need to run container as root (for example for accessing `/dev/kvm`),
+apply following file:
+
+    oc replace -f openshift-objects-root.yml
 
 Also, create a `config.json` and a directory containing the secrets mentioned
 above, and add `ConfigMap` and `Secret` objects with:
