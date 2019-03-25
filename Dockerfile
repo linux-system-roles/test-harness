@@ -2,6 +2,7 @@ FROM fedora:28
 
 RUN dnf update -y && dnf install -y \
     ansible \
+    dumb-init \
     git \
     python3-requests \
     python3-CacheControl \
@@ -15,4 +16,5 @@ COPY test /test
 VOLUME /config /secrets /cache
 
 WORKDIR /home/tester
-ENTRYPOINT ["/test/run-tests"]
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+CMD ["/test/run-tests"]
