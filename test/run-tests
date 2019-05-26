@@ -583,7 +583,7 @@ def handle_task(gh, args, config, task, dry_run=False):
 
     abort = False
 
-    description = HOSTNAME
+    description = HOSTNAME + "@" + str(datetime.datetime.utcnow())
     target_url = None
     state = None
 
@@ -604,7 +604,7 @@ def handle_task(gh, args, config, task, dry_run=False):
 
         gh.post(
             f"repos/{task.owner}/{task.repo}/statuses/{task.head}",
-            {"context": status_context, "state": "pending", "description": HOSTNAME},
+            {"context": status_context, "state": "pending", "description": description},
         )
 
     try:
@@ -613,7 +613,7 @@ def handle_task(gh, args, config, task, dry_run=False):
 
             statuses = get_statuses(gh, task.owner, task.repo, task.head)
             status = statuses.get(status_context)
-            if status["description"] != HOSTNAME:
+            if status["description"] != description:
                 print(
                     f"Skip: another instance is working on this task: "
                     + status["description"]
