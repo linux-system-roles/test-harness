@@ -773,6 +773,7 @@ def main():
     with open(args.config + "/config.json") as configfile:
         config.update(json.load(configfile))
         images = config["images"]
+        random.shuffle(images)
         repos = [r.split("/") for r in config.get("repositories", [])]
 
     gh = cachecontrol.CacheControl(Session("https://api.github.com"))
