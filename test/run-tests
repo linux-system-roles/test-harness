@@ -103,6 +103,13 @@ def handle_transient_httperrors(error):
         print(f">>> Rate limiting hit, waiting for {int(timeout)} seconds...")
         time.sleep(timeout)
     else:
+        # If this is error from GitHub, there should be some explanation in response
+        # content. Try to print it.
+        try:
+            print("E: GitHub: " + error.response.json()["message"])
+        except Exception:
+            pass
+
         return False
 
     return True
