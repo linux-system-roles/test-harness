@@ -495,7 +495,9 @@ def choose_task(gh, repos, images, config):
     """
 
     for owner, repo in repos:
-        for pull in gh.get(f"repos/{owner}/{repo}/pulls").json():
+        pulls = gh.get(f"repos/{owner}/{repo}/pulls").json()
+        random.shuffle(pulls)
+        for pull in pulls:
             author = pull["user"]["login"]
             head = pull["head"]["sha"]
             number = pull["number"]
