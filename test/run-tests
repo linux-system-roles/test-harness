@@ -775,7 +775,7 @@ def main():
         images = config["images"]
         repos = [r.split("/") for r in config.get("repositories", [])]
 
-    gh = cachecontrol.CacheControl(Session("https://api.github.com"))
+    gh = Session("https://api.github.com")
     gh.headers.update(
         {
             "Accept": "application/vnd.github.v3+json",
@@ -786,10 +786,11 @@ def main():
     if token:
         gh.headers.update({"Authorization": f"token {token}"})
 
+    # Use CacheControl.
     # Requests on keep-alive connections fail when the remote has closed a
     # connection before we've noticed and sent another request. Thus,
     # always retry sending requests once.
-    gh.mount("https://", requests.adapters.HTTPAdapter(max_retries=1))
+    gh.mount("https://", cachecontrol.CacheControlAdapter(max_retries=1))
 
     printed_waiting = False
 
