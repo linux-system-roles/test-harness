@@ -25,6 +25,7 @@ import urllib.request
 
 import requests
 import cachecontrol
+import cachecontrol.heuristics
 import yaml
 
 HOSTNAME = socket.gethostname()
@@ -166,6 +167,20 @@ class redirect_output:  # pylint: disable=invalid-name
 
         sys.stdout = self.oldout
         sys.stderr = self.olderr
+
+
+class DontCacheStatuses(cachecontrol.heuristics.BaseHeuristic):
+    """
+    'Heuristics' for preventing caching of statuses.
+    """
+
+    def update_headers(self, response):
+        # We need to remove 'max-age' from cache-control
+        # TODO: figure out a way to discern responses for statuses query
+        return {"cache-control": "private"}
+
+    def warning(self, response):
+        pass
 
 
 def run(*argv, env=None, check=True, cwd=None):
@@ -790,7 +805,10 @@ def main():
     # Requests on keep-alive connections fail when the remote has closed a
     # connection before we've noticed and sent another request. Thus,
     # always retry sending requests once.
-    gh.mount("https://", cachecontrol.CacheControlAdapter(max_retries=1))
+    gh.mount(
+        "https://",
+        cachecontrol.CacheControlAdapter(max_retries=1, heuristic=DontCacheStatuses()),
+    )
 
     printed_waiting = False
 
