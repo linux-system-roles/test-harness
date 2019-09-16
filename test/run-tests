@@ -487,15 +487,17 @@ def choose_task(gh, repos, images, config):
     Collect tasks from open pull requests (one task for each image
     and each open pull).
 
-    Return one of those tasks at random, so that we reduce the probability of
-    choosing the same one as another instance of this script.
+    Return the first found task. The caller needs to provide shuffled
+    repos/images to reduce the probability that other instances choose the same
+    task.
 
     Returns None if there's nothing to do.
     """
 
-    tasks = []
     for owner, repo in repos:
-        for pull in gh.get(f"repos/{owner}/{repo}/pulls").json():
+        pulls = gh.get(f"repos/{owner}/{repo}/pulls").json()
+        random.shuffle(pulls)
+        for pull in pulls:
             author = pull["user"]["login"]
             head = pull["head"]["sha"]
             number = pull["number"]
@@ -512,10 +514,7 @@ def choose_task(gh, repos, images, config):
 
                 if check_commit_needs_testing(status, commands):
                     task = Task(owner, repo, number, head, image)
-                    tasks.append(task)
-
-    if tasks:
-        return random.choice(tasks)
+                    return task
 
 
 def check_commit_needs_testing(status, commands):
@@ -788,7 +787,9 @@ def main():
     with open(args.config + "/config.json") as configfile:
         config.update(json.load(configfile))
         images = config["images"]
+        random.shuffle(images)
         repos = [r.split("/") for r in config.get("repositories", [])]
+        random.shuffle(repos)
 
     gh = Session("https://api.github.com")
     gh.headers.update(
