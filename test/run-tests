@@ -863,6 +863,10 @@ def main():
             if not handle_transient_httperrors(err):
                 raise
 
+        # At this point, we have (probably) printed other messages, so
+        # reset printed_waiting
+        printed_waiting = False
+
 
 if __name__ == "__main__":
     sys.exit(main())
