@@ -208,14 +208,14 @@ $ ./add-staging-tag linux-system-roles
 and now you should have `staging` tag in your `linux-system-roles` image
 stream.
 
-The CI system launches virtual machines (VMs for short), so the user under who
-these VMs are launched needs an access to `/dev/kvm` (in other words, the user
-must be privileged). The CI system launches the VMs as the user who's name is
-`tester`. Such a user must be present in a list of privileged user. If you are
+The CI system launches virtual machines (VMs for short), so the container
+needs to have `/dev/kvm` device (in other words, the container must be
+privileged). Containers are launched using service account named `tester`.
+Such account must be present in a list of privileged account. If you are
 a cluster-admin, you can simply type
 
 ```
-$ oc edit scc ci-pipeline-scc
+$ oc edit scc privileged
 ```
 
 and then add under the `users` list a user with the name `tester`. Please keep
@@ -241,7 +241,7 @@ After you save and quit the editor, `tester` should become the new privileged
 user. You can check this with
 
 ```
-$ oc get scc ci-pipeline-scc -o jsonpath='{range .users[*]}{@}{"\n"}{end}' | grep -Ee ':tester$'
+$ oc get scc -o jsonpath='{range .items[?(.allowPrivilegedContainer==true)].users[*]}{@}{"\n"}{end}' | grep -Ee ':tester$'
 system:serviceaccount:lsr-test-harness:tester
 $
 ```
