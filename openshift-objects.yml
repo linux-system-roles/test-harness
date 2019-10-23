@@ -15,6 +15,10 @@ items:
           from:
             kind: DockerImage
             name: docker.io/linuxsystemroles/test-harness
+        - name: staging
+          from:
+            kind: DockerImage
+            name: docker.io/linuxsystemroles/test-harness:staging
   - kind: DeploymentConfig
     apiVersion: v1
     metadata:
