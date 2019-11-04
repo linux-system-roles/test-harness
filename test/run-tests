@@ -567,6 +567,7 @@ def scp(source, destination, secrets):
         "-rpq",
         source,
         destination,
+        check=False,
     )
     return result.returncode == 0
 
