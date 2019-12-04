@@ -100,6 +100,7 @@ def handle_transient_httperrors(error):
             transient_error_wait_time.next(),
         )
 
+        logging.info("Rate limiting hit, waiting for %s seconds", int(timeout))
         print(f">>> Rate limiting hit, waiting for {int(timeout)} seconds...")
         time.sleep(timeout)
     else:
@@ -111,12 +112,13 @@ def handle_transient_httperrors(error):
             github_msg = ""
         else:
             print("W: GitHub: " + github_msg)
+            logging.error("GitHub: %s", github_msg)
 
         if "abuse detection" in github_msg:
             timeout = transient_error_wait_time.next()
-            print(
-                ">>> We have triggered abuse detection, waiting {} s...".format(timeout)
-            )
+            msg = "We have triggered abuse detection, waiting {} s...".format(timeout)
+            print(">>> {}".format(msg))
+            logging.warning("%s", msg)
             time.sleep(timeout)
             return True
 
@@ -622,6 +624,13 @@ def handle_task(gh, args, config, task, dry_run=False):
     status_context = f"{config['name']}/{task.image['name']}"
 
     if not dry_run:
+        logging.info(
+            "Claiming task %s/%s/%d:%s",
+            task.owner,
+            task.repo,
+            task.pull,
+            task.image["name"],
+        )
         # When running multiple instances of this script, there's a race
         # between choosing a task and setting the status on GitHub to "pending"
         # (there's no race-free way to only set the status for a context when
@@ -655,6 +664,13 @@ def handle_task(gh, args, config, task, dry_run=False):
                 dry_run = True
                 return
 
+        logging.info(
+            "Starting task %s/%s/%d:%s",
+            task.owner,
+            task.repo,
+            task.pull,
+            task.image["name"],
+        )
         timestamp = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
 
         workdir = tempfile.mkdtemp(prefix=f"linux-system-role-test-work-{task.id_}-")
@@ -720,6 +736,14 @@ def handle_task(gh, args, config, task, dry_run=False):
             shutil.rmtree(workdir)
 
     finally:
+        logging.info(
+            "Finished task %s/%s/%d:%s: %s",
+            task.owner,
+            task.repo,
+            task.pull,
+            task.image["name"],
+            state if state and state != "pending" else "abandoned",
+        )
         while not dry_run:
             try:
                 gh.post(
@@ -753,6 +777,35 @@ def check_environment():
     if not os.access("/dev/kvm", os.R_OK | os.W_OK):
         print("test-harness needs access to /dev/kvm, aborting")
         sys.exit(1)
+
+
+def setup_logging(config_logging):
+    log_cfg_default = {
+        "format": "%(asctime)s: %(levelname)s: %(message)s",
+        "datefmt": "%Y-%m-%dT%H:%M:%S",
+    }
+
+    log_cfg = log_cfg_default.copy()
+    log_cfg.update(
+        (k, v)
+        for k, v in config_logging.items()
+        if k not in ("stream", "handlers", "force")
+    )
+
+    # as config may be shared between multiple hosts with shared storage, we
+    # need hostname in log name
+    if "filename" in log_cfg:
+        if "HOSTNAME" in log_cfg["filename"]:
+            log_cfg["filename"] = log_cfg["filename"].replace("HOSTNAME", HOSTNAME)
+        else:
+            log_cfg["filename"] = log_cfg["filename"] + HOSTNAME
+
+    try:
+        logging.basicConfig(**log_cfg)
+    except ValueError:
+        # invalid logging config, ignore it
+        logging.basicConfig(**log_cfg_default)
+        logging.warning("Invalid logging config", exc_info=True)
 
 
 def main():
@@ -808,6 +861,9 @@ def main():
         random.shuffle(images)
         repos = [r.split("/") for r in config.get("repositories", [])]
         random.shuffle(repos)
+
+    if "logging" in config:
+        setup_logging(config.get("logging", {}))
 
     gh = Session("https://api.github.com")
     gh.headers.update(
