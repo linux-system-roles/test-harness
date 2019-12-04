@@ -94,6 +94,15 @@ accessible URL for these results. For example:
   "results": {
     "destination": "user@example.org:public_html/logs",
     "public_url": "https://example.com/logs"
+  },
+  "logging": {
+    "level": "WARNING",
+    "filename": "/var/log/test-harness_HOSTNAME.log",
+    "format": "%(asctime)s: %(levelname)s: %(message)s",
+    "datefmt": "%Y-%m-%dT%H:%M:%S%z",
+    "style": "%",
+    "file_level": "NOTSET",
+    "stderr_level": "WARNING"
   }
 }
 ```
@@ -346,3 +355,42 @@ $ oc import-image linux-system-roles:staging
 Congratulations! Now you can check via OpenShift web console that the things
 are properly set up. You can browse the statuses, scale a number of pods in
 each deployment up or down and do many other operations.
+
+## Logging
+
+To change the log level, use `oc edit configmap config` or `oc edit configmap config-staging` and edit the `"logging"` section - change both the `"level"` and the `"stderr_level"` or `"file_level"`.  You will need to rollout the `dc` for the change to go into effect (there is no trigger for configmap changes):
+
+```
+$ oc edit configmap config
+...
+$ oc rollout latest dc/linux-system-roles
+$ oc get pods -w
+```
+
+For staging:
+
+```
+$ oc edit configmap config-staging
+...
+$ oc rollout latest dc/linux-system-roles-staging
+$ oc get pods -w
+```
+
+When using file logging e.g.
+
+```
+  "logging": {
+    "filename": "/var/log/test-harness_HOSTNAME.log",
+    "file_level": "DEBUG",
+```
+
+The file is written inside the container.  If you want to see the file, you will need
+to use `oc exec` or `oc rsh`:
+
+```
+$ oc get pods
+NAME                                  READY     STATUS       RESTARTS   AGE
+linux-system-roles-12-ddtrs           1/1       Running      57         55d
+...
+$ oc exec linux-system-roles-12-ddtrs -- cat /var/log/test-harness_linux-system-roles-12-ddtrs.log
+```
