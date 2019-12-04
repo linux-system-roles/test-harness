@@ -831,6 +831,11 @@ def main():
 
     printed_waiting = False
 
+    # Random delay at startup to prevent triggering abuse detection on GitHub
+    # when multiple instances are started in same time
+    if not args.dry_run:
+        time.sleep(random.randint(0, 60))
+
     for pull_request in args.pull_request:
         # supports to specify the PR with full URLs or just the path
         parsed_url = urllib.parse.urlparse(pull_request)
