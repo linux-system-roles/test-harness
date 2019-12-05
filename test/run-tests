@@ -106,9 +106,19 @@ def handle_transient_httperrors(error):
         # If this is error from GitHub, there should be some explanation in response
         # content. Try to print it.
         try:
-            print("E: GitHub: " + error.response.json()["message"])
+            github_msg = error.response.json()["message"]
         except Exception:
-            pass
+            github_msg = ""
+        else:
+            print("W: GitHub: " + github_msg)
+
+        if "abuse detection" in github_msg:
+            timeout = transient_error_wait_time.next()
+            print(
+                ">>> We have triggered abuse detection, waiting {} s...".format(timeout)
+            )
+            time.sleep(timeout)
+            return True
 
         return False
 
@@ -820,6 +830,11 @@ def main():
     )
 
     printed_waiting = False
+
+    # Random delay at startup to prevent triggering abuse detection on GitHub
+    # when multiple instances are started in same time
+    if not args.dry_run:
+        time.sleep(random.randint(0, 60))
 
     for pull_request in args.pull_request:
         # supports to specify the PR with full URLs or just the path
