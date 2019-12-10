@@ -849,8 +849,7 @@ def main():
         repos = [r.split("/") for r in config.get("repositories", [])]
         random.shuffle(repos)
 
-    if "logging" in config:
-        setup_logging(config.get("logging", {}))
+    setup_logging(config.get("logging", {}))
 
     gh = Session("https://api.github.com")
     gh.headers.update(
