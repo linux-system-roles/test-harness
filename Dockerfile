@@ -14,7 +14,6 @@ USER tester
 COPY test /test
 
 VOLUME /config /secrets /cache
-VOLUME /log
 
 WORKDIR /home/tester
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
