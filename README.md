@@ -86,6 +86,10 @@ accessible URL for these results. For example:
   "results": {
     "destination": "user@example.org:public_html/logs",
     "public_url": "https://example.com/logs"
+  },
+  "logging": {
+    "filename": "/log/test-harness_HOSTNAME.log",
+    "level": "WARNING"
   }
 }
 ```
