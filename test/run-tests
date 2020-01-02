@@ -777,12 +777,9 @@ def setup_logging(config_logging):
     log_cfg.update(config_logging)
 
     # as config may be shared between multiple hosts with shared storage, we
-    # need hostname in log name
+    # may need hostname in log name
     if "filename" in log_cfg:
-        if "HOSTNAME" in log_cfg["filename"]:
-            log_cfg["filename"] = log_cfg["filename"].replace("HOSTNAME", HOSTNAME)
-        else:
-            log_cfg["filename"] = log_cfg["filename"] + HOSTNAME
+        log_cfg["filename"] = log_cfg["filename"].replace("HOSTNAME", HOSTNAME)
 
     try:
         logging.basicConfig(**log_cfg)
