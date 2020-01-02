@@ -774,11 +774,7 @@ def setup_logging(config_logging):
     }
 
     log_cfg = log_cfg_default.copy()
-    log_cfg.update(
-        (k, v)
-        for k, v in config_logging.items()
-        if k not in ("stream", "handlers", "force")
-    )
+    log_cfg.update(config_logging)
 
     # as config may be shared between multiple hosts with shared storage, we
     # need hostname in log name
