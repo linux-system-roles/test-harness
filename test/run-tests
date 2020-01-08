@@ -455,14 +455,10 @@ def get_statuses(gh, owner, repo, sha):
     mapping context to its most recent status.
     """
 
-    statuses = {}
-    for status in gh.get(f"repos/{owner}/{repo}/statuses/{sha}").json():
-        # only add the first occurence of a context, since the result is in
-        # reverse chronological order:
-        # https://developer.github.com/v3/repos/statuses/#list-statuses-for-a-specific-ref
-        statuses.setdefault(status["context"], status)
+    # https://developer.github.com/v3/repos/statuses/#get-the-combined-status-for-a-specific-ref
+    status = gh.get(f"repos/{owner}/{repo}/commits/{sha}/status").json()
 
-    return statuses
+    return {x["context"]: x for x in status["statuses"]}
 
 
 def get_comments(gh, owner, repo, pullnr, after=""):
