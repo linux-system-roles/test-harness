@@ -100,8 +100,7 @@ def handle_transient_httperrors(error):
             transient_error_wait_time.next(),
         )
 
-        logging.info("Rate limiting hit, waiting for %s seconds", int(timeout))
-        print(f">>> Rate limiting hit, waiting for {int(timeout)} seconds...")
+        logging.warning("Rate limiting hit, waiting for %s seconds", int(timeout))
         time.sleep(timeout)
     else:
         # If this is error from GitHub, there should be some explanation in response
@@ -111,13 +110,11 @@ def handle_transient_httperrors(error):
         except Exception:
             github_msg = ""
         else:
-            print("W: GitHub: " + github_msg)
             logging.error("GitHub: %s", github_msg)
 
         if "abuse detection" in github_msg:
             timeout = transient_error_wait_time.next()
             msg = "We have triggered abuse detection, waiting {} s...".format(timeout)
-            print(">>> {}".format(msg))
             logging.warning("%s", msg)
             time.sleep(timeout)
             return True
@@ -772,17 +769,30 @@ def setup_logging(config_logging):
         "format": "%(asctime)s: %(levelname)s: %(message)s",
         "datefmt": "%Y-%m-%dT%H:%M:%S%z",
     }
-
     log_cfg = log_cfg_default.copy()
-    log_cfg.update(config_logging)
-
-    # as config may be shared between multiple hosts with shared storage, we
-    # may need hostname in log name
-    if "filename" in log_cfg:
-        log_cfg["filename"] = log_cfg["filename"].replace("HOSTNAME", HOSTNAME)
+    log_cfg.update(
+        (k, v)
+        for k, v in config_logging.items()
+        if k in {"format", "style", "datefmt", "level"}
+    )
 
     try:
-        logging.basicConfig(**log_cfg)
+        # Add stderr handler
+        handlers = [
+            logging.StreamHandler(
+                level=config_logging.get("stderr_level", logging.WARNING)
+            )
+        ]
+
+        if "filename" in config_logging:
+            # as config may be shared between multiple hosts with shared storage,
+            # we may need hostname in log name
+            filename = log_cfg["filename"].replace("HOSTNAME", HOSTNAME)
+            file_handler = logging.FileHandler(filename)
+            file_handler.setLevel(config_logging.get("file_level", logging.NOTSET))
+            handlers.append(file_handler)
+
+        logging.basicConfig(handlers=handlers, **log_cfg)
     except ValueError:
         logging.basicConfig(**log_cfg_default)
         logging.warning("Invalid logging config, using default", exc_info=True)

@@ -88,8 +88,13 @@ accessible URL for these results. For example:
     "public_url": "https://example.com/logs"
   },
   "logging": {
-    "filename": "/log/test-harness_HOSTNAME.log",
-    "level": "WARNING"
+    "level": "WARNING",
+    "filename": "/var/log/test-harness_HOSTNAME.log",
+    "format": "%(asctime)s: %(levelname)s: %(message)s",
+    "datefmt": "%Y-%m-%dT%H:%M:%S%z",
+    "style": "%",
+    "file_level": "NOTSET",
+    "stderr_level": "WARNING"
   }
 }
 ```
