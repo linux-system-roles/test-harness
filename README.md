@@ -86,6 +86,15 @@ accessible URL for these results. For example:
   "results": {
     "destination": "user@example.org:public_html/logs",
     "public_url": "https://example.com/logs"
+  },
+  "logging": {
+    "level": "WARNING",
+    "filename": "/var/log/test-harness_HOSTNAME.log",
+    "format": "%(asctime)s: %(levelname)s: %(message)s",
+    "datefmt": "%Y-%m-%dT%H:%M:%S%z",
+    "style": "%",
+    "file_level": "NOTSET",
+    "stderr_level": "WARNING"
   }
 }
 ```
