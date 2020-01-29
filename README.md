@@ -23,8 +23,9 @@ Installation
 
 A docker container which runs integration tests for open pull requests on
 [linux system roles](https://linux-system-roles.github.io) repositories. It runs
-all playbooks `test/test_*.yml` of the repository against various virtual
-machines.
+all playbooks matching `tests/tests*.yml` (intentionally identical to
+the pattern used in the Fedora Standard Test Interface) of the
+repository against various virtual machines.
 
 To build the container, run
 
