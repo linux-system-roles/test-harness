@@ -34,6 +34,15 @@ COMMENT_CMD_TEST_ALL = "[citest]"
 COMMENT_CMD_TEST_PENDING = "[citest pending]"
 COMMENT_CMD_TEST_BAD = "[citest bad]"
 
+DEFAULT_LOGLEVEL = "INFO"
+loglevel = os.environ.get("LOGLEVEL", DEFAULT_LOGLEVEL)
+numeric_loglevel = getattr(logging, loglevel.upper(), None)
+if not isinstance(numeric_loglevel, int):
+    raise ValueError("Invalid log level: %s" % loglevel)
+logging.basicConfig(
+    level=numeric_loglevel, format="%(asctime)s %(levelname)s %(message)s"
+)
+
 
 class TransientErrorWaitTime:
     TIME_DEFAULT = 30
@@ -55,7 +64,7 @@ transient_error_wait_time = TransientErrorWaitTime()
 
 
 def sighandler_exit(signo, frame):
-    print(f"Received {signal.Signals(signo).name}, exiting...", file=sys.stderr)
+    logging.info(f"Received {signal.Signals(signo).name}, exiting...")
     sys.exit(0)
 
 
@@ -69,7 +78,7 @@ def handle_transient_httperrors(error):
     # Handle transient server-side errors
     if error.response.status_code in (500, 502, 503, 504):
         timeout = transient_error_wait_time.next()
-        print(
+        logging.info(
             ">>> Server returned {} {}, waiting {} s...".format(
                 error.response.status_code, error.response.reason, timeout
             )
@@ -88,8 +97,8 @@ def handle_transient_httperrors(error):
                 )
             )
         except ValueError as e:
-            print(
-                'W: Failed to parse date "{}" from headers: {}'.format(
+            logging.warning(
+                'Failed to parse date "{}" from headers: {}'.format(
                     error.response.headers["Date"], e
                 )
             )
@@ -100,7 +109,7 @@ def handle_transient_httperrors(error):
             transient_error_wait_time.next(),
         )
 
-        print(f">>> Rate limiting hit, waiting for {int(timeout)} seconds...")
+        logging.info(f">>> Rate limiting hit, waiting for {int(timeout)} seconds...")
         time.sleep(timeout)
     else:
         # If this is error from GitHub, there should be some explanation in response
@@ -110,11 +119,11 @@ def handle_transient_httperrors(error):
         except Exception:
             github_msg = ""
         else:
-            print("W: GitHub: " + github_msg)
+            logging.warning("GitHub: " + github_msg)
 
         if "abuse detection" in github_msg:
             timeout = transient_error_wait_time.next()
-            print(
+            logging.info(
                 ">>> We have triggered abuse detection, waiting {} s...".format(timeout)
             )
             time.sleep(timeout)
@@ -244,7 +253,6 @@ def fetch_image(url, cache):
             shutil.copyfileobj(request, image_tempfile)
             request.close()
         except Exception:  # pylint: disable=broad-except
-            logging.warning(traceback.format_exc())
             os.unlink(image_tempfile.name)
             return None
 
@@ -432,6 +440,10 @@ def pull_ok_to_test(gh, owner, repo, pull, author, head):
 
     result = gh.get(f"repos/{owner}/{repo}/collaborators/{author}", check=False)
     if result.status_code == 204:
+        logging.debug(
+            "PR is ok to test - is a collaborator "
+            f"repos/{owner}/{repo}/collaborators/{author}"
+        )
         return True
 
     # Check if a member commented with a command like
@@ -442,11 +454,14 @@ def pull_ok_to_test(gh, owner, repo, pull, author, head):
     for comment in comments:
         if comment["author_association"] == "MEMBER":
             if whitelist_command in comment["body"]:
+                logging.debug("PR is ok to test - whitelisted by member")
                 return True
 
     result = gh.get(f"repos/{owner}/{repo}/issues/{pull}/labels")
     if result.status_code == 200 and "needs-ci" in (x["name"] for x in result.json()):
+        logging.debug("PR is ok to test - has needs-ci label")
         return True
+    logging.debug("PR is not ok to test")
 
 
 def get_statuses(gh, owner, repo, sha):
@@ -511,6 +526,7 @@ def choose_task(gh, repos, images, config):
         pulls = gh.get(f"repos/{owner}/{repo}/pulls").json()
         random.shuffle(pulls)
         for pull in pulls:
+            logging.debug("Evaluating PR {}".format(pull["url"]))
             author = pull["user"]["login"]
             head = pull["head"]["sha"]
             number = pull["number"]
@@ -527,7 +543,18 @@ def choose_task(gh, repos, images, config):
 
                 if check_commit_needs_testing(status, commands):
                     task = Task(owner, repo, number, head, image)
+                    logging.debug(
+                        f"Testing PR {pull['url']} with image {image['source']}"
+                    )
                     return task
+                else:
+                    logging.debug(
+                        f"Not testing PR {pull['url']} with image {image['source']}"
+                    )
+            else:
+                logging.debug("No images to use for testing PR {}".format(pull["url"]))
+        else:
+            logging.debug(f"No pull requests for {owner}/{repo}")
 
 
 def check_commit_needs_testing(status, commands):
@@ -535,30 +562,46 @@ def check_commit_needs_testing(status, commands):
 
     # Check it, if there's no status for it yet
     if not status:
+        logging.debug("PR has no status")
         return True
+    else:
+        logging.debug(f"PR has a status with state {status['state']}")
 
     # or the status is pending without a hostname in the description
     if status["state"] == "pending" and not status.get("description"):
+        logging.debug("PR is in state 'pending' and has no description")
         return True
+    else:
+        logging.debug("PR is not in state 'pending' or has a description")
 
     # or a generic re-check was requested:
     if status["updated_at"] < commands[COMMENT_CMD_TEST_ALL]:
+        logging.debug("PR was given comment to retest all")
         return True
+    else:
+        logging.debug("PR was not given retest all command after it was updated")
 
     # or the status is error or failure and a re-check was requested
     if (
         status["state"] in ("failure", "error")
         and status["updated_at"] < commands[COMMENT_CMD_TEST_BAD]
     ):
+        logging.debug("PR was given comment to retest failing tests")
         return True
+    else:
+        logging.debug("PR state not error, or retest failing test command not given")
 
     # or the status is pending and a re-check was requested
     if (
         status["state"] == "pending"
         and status["updated_at"] < commands[COMMENT_CMD_TEST_PENDING]
     ):
+        logging.debug("PR was given comment to retest pending tests")
         return True
+    else:
+        logging.debug("PR state not pending, or retest pending test command not given")
 
+    logging.debug("PR does not need testing")
     return False
 
 
@@ -607,7 +650,7 @@ def handle_task(gh, args, config, task, dry_run=False):
     """ Process a task """
     title = f"{HOSTNAME}: {task.owner}/{task.repo}: pull #{task.pull} "
     title += f'({task.head[:7]}) on {task.image["name"]}'
-    print(">>>", title)
+    logging.info(">>> " + title)
 
     abort = False
 
@@ -642,11 +685,10 @@ def handle_task(gh, args, config, task, dry_run=False):
             statuses = get_statuses(gh, task.owner, task.repo, task.head)
             status = statuses.get(status_context)
             if status["description"] != description:
-                print(
+                logging.info(
                     f"Skip: another instance is working on this task: "
                     + status["description"]
                 )
-                print()
                 # avoid overwriting status from another instance
                 dry_run = True
                 return
@@ -689,15 +731,16 @@ def handle_task(gh, args, config, task, dry_run=False):
                 print(traceback.format_exc())
                 state = "error"
                 description += ": Exception when running tests: " + str(e)
+                logging.error(description)
 
         run("chmod", "a+rX", workdir)
 
         local_test_log = f"{artifactsdir}/test.log"
 
         if dry_run:
-            print(f"Artifacts kept at: {artifactsdir}")
+            logging.info(f"Artifacts kept at: {artifactsdir}")
             with open(local_test_log) as test_log:
-                print(test_log.read())
+                logging.info(test_log.read())
         else:
             make_html(local_test_log)
 
@@ -737,7 +780,7 @@ def handle_task(gh, args, config, task, dry_run=False):
     print()
 
     if abort:
-        print("Fatal exception occured, aborting...")
+        logging.critical("Fatal exception occured, aborting...")
         sys.exit(1)
 
 
@@ -747,12 +790,13 @@ def check_environment():
     Intent here is to fail early for example if /dev/kvm is not available.
     """
     if not os.access("/dev/kvm", os.R_OK | os.W_OK):
-        print("test-harness needs access to /dev/kvm, aborting")
+        logging.critical("test-harness needs access to /dev/kvm, aborting")
         sys.exit(1)
 
 
 def main():
     signal.signal(signal.SIGTERM, sighandler_exit)
+    logging.info("Starting")
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--secrets", default="/secrets", help="Directory with secrets")
@@ -833,6 +877,7 @@ def main():
         time.sleep(random.randint(0, 60))
 
     for pull_request in args.pull_request:
+        logging.debug(f"Processing command line pull request {pull_request}")
         # supports to specify the PR with full URLs or just the path
         parsed_url = urllib.parse.urlparse(pull_request)
         owner, repo, pullnr = (
@@ -865,8 +910,10 @@ def main():
             task = choose_task(gh, repos, images, config)
             if not task:
                 if not printed_waiting:
-                    print(">>> No tasks. Waiting.")
+                    logging.info(">>> No tasks. Waiting.")
                     printed_waiting = True
+                else:
+                    logging.debug(">>> Still no tasks. Waiting.")
                 time.sleep(600)
                 continue
 

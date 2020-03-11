@@ -289,3 +289,55 @@ $ oc import-image linux-system-roles:staging
 Congratulations! Now you can check via OpenShift web console that the things
 are properly set up. You can browse the statuses, scale a number of pods in
 each deployment up or down and do many other operations.
+
+### Changing the loglevel of the run-tests command
+
+When the pods are running, you can use the `oc logs` command to see what the
+pods are doing:
+
+```
+$ oc get pods
+NAME                                  READY     STATUS    RESTARTS   AGE
+linux-system-roles-12-ddtrs           1/1       Running   56         43d
+linux-system-roles-staging-14-kgj8r   1/1       Running   1          1d
+...
+$ oc logs linux-system-roles-staging-14-kgj8r
+>>> linux-system-roles-staging-14-kgj8r: linux-system-roles/logging: pull #91 (4ebdc68) on rhel-8
++ chmod a+rX /tmp/linux-system-role-test-work-pull-linux-system-roles_logging-91-4ebdc68-rhel-8-4dolkphu
+...
+```
+
+The environment variable `LOGLEVEL` is used to control the log level output by
+the pod.  The default log level is `INFO`.  The levels used correspond to the
+standard python logging library
+[levels](https://docs.python.org/2/library/logging.html#logging-levels)
+
+To change the the log level, you must set the environment variable to the
+desired value in the desired deploymentconfig.
+
+```
+$ oc get dc
+NAME                         REVISION   DESIRED   CURRENT   TRIGGERED BY
+linux-system-roles           12         10        10        config,image(linux-system-roles:latest)
+linux-system-roles-staging   14         1         1         config,image(linux-system-roles:staging)
+
+$ oc set env dc/linux-system-roles-staging LOGLEVEL=DEBUG
+```
+
+Because the dc uses a trigger for config, the dc will automatically redeploy
+all of the pods for that dc.  In the example above, it will redeploy the
+staging pods.  Now, you will get debug output from the pod:
+
+```
+$ oc logs linux-system-roles-staging-14-jk2jx
+2020-03-11 12:42:00,418 INFO Starting
+2020-03-11 12:42:00,420 DEBUG Converted retries value: 1 -> Retry(total=1, connect=None, read=None, redirect=None, status=None)
+2020-03-11 12:42:20,448 DEBUG Looking up "https://api.github.com/repos/linux-system-roles/kernel_settings/pulls" in the cache
+...
+```
+
+After you are finished debugging, be sure to reset the value back to `INFO`:
+
+```
+$ oc set env dc/linux-system-roles-staging LOGLEVEL=INFO
+```
