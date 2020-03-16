@@ -1,0 +1,26 @@
+---
+- name: Create temp file for config
+  tempfile:
+    state: file
+    suffix: lsr.yml
+  register: config_tempfile
+  changed_when: false
+
+- name: Generate config file
+  shell: oc -n {{ test_harness_namespace }} create configmap {{ __test_harness_cm_name }} \
+    --from-file=config.json={{ test_harness_config_dir }}/{{ __test_harness_cm_file }} --dry-run=true \
+    --output=yaml > {{ config_tempfile.path }}
+  changed_when: false
+
+- name: Ensure configmap is present
+  k8s:
+    src: "{{ config_tempfile.path }}"
+    namespace: "{{ test_harness_namespace }}"
+    state: present
+    apply: true
+
+- name: Remove config file
+  file:
+    state: absent
+    path: "{{ config_tempfile.path }}"
+  changed_when: false

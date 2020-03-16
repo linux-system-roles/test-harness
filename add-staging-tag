@@ -8,5 +8,5 @@ spec:
     - name: staging
       from:
         kind: DockerImage
-        name: docker.io/linuxsystemroles/test-harness:staging
+        name: linux-system-roles:staging
 '
