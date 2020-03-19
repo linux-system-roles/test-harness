@@ -71,7 +71,7 @@
     include_tasks: tasks/setup-ci-environ.yml
     vars:
       __test_harness_environ: staging
-      __test_harness_cm_name: linux-system-roles-staging
+      __test_harness_cm_name: config-staging
       __test_harness_cm_file: config-staging.json
       __test_harness_ci_obj_file: ../openshift-objects-staging.yml
       __test_harness_dc: linux-system-roles-staging
@@ -82,7 +82,7 @@
     include_tasks: tasks/setup-ci-environ.yml
     vars:
       __test_harness_environ: production
-      __test_harness_cm_name: linux-system-roles
+      __test_harness_cm_name: config
       __test_harness_cm_file: config.json
       __test_harness_ci_obj_file: ../openshift-objects.yml
       __test_harness_dc: linux-system-roles
