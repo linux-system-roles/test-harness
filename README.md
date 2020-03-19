@@ -24,7 +24,15 @@ all playbooks matching `tests/tests*.yml` (intentionally identical to
 the pattern used in the Fedora Standard Test Interface) of the
 repository against various virtual machines.
 
-To build the container, run
+If using OpenShift, see below.
+
+To build the container for local testing, run
+
+```
+podman build -t linuxsystemroles/test-harness:latest .
+```
+
+If `podman` isn't working, try `docker`:
 
 ```
 sudo docker build -t linuxsystemroles/test-harness:latest .
@@ -117,7 +125,7 @@ In this section we first describe how to setup an OpenShift environment and run
 the CI system on it. Then we give several tips concerning maintenance the
 entire system and backing up important data.
 
-### Preparing OpenShift Environment and Running the CI System on it
+### Preparing OpenShift Environment
 
 In our use case, we create OpenShift project with two deployments. The first
 one will be used for testing and will be based on
@@ -136,9 +144,10 @@ empty directory and put the secrets inside it (files `github-token`, `id_rsa`,
 In what follows, suppose you have set following environment variables:
 
 * `PROJECT_NAME`: A name of OpenShift project.
-* `CONFIG_PATH`: A path to `config.json`.
-* `CONFIG_STAGING_PATH`: A path to `config-staging.json`.
+* `CONFIG_PATH`: A path to directory with `config.json` and `config-staging.json`
 * `SECRETS_PATH`: A path to the directory with secrets.
+* `SCC_NAME`: The name of the SecurityContextConstraints that you will add your
+              ServiceAccount to for privileged operations (e.g. `privileged`)
 
 First, you need to be logged on (replace `[URL]` with a real URL of your
 OpenShift server):
@@ -147,7 +156,55 @@ OpenShift server):
 $ oc login [URL]
 ```
 
-Now, you can create a fresh OpenShift project:
+### Installing CI System in OpenShift using Ansible
+
+NOTE: Ansible will be running all of the commands on `localhost`, instead of
+executing the tasks remotely in the cluster.  That is, the Ansible playbook
+will be using the `oc` OpenShift command line tool, and the python OpenShift
+API library, to execute API calls in the OpenShift cluster to provision and
+configure the resources in the OpenShift cluster.  So make sure you are logged
+into the OpenShift cluster first:
+
+```
+$ oc login [URL]
+```
+
+Then execute the playbook:
+
+```
+$ ansible-playbook -e test_harness_secrets_dir=$SECRETS_PATH \
+    -e test_harness_config_dir=$CONFIG_PATH \
+    -e test_harness_scc=$SCC_NAME \
+    ansible/openshift-playbook.yml
+```
+
+Parameters:
+* `test_harness_secrets_dir` - Required - See `SECRETS_PATH`
+* `test_harness_config_dir` - Required - See `CONFIG_PATH`
+* `test_harness_scc` - Required - See `SCC_NAME`
+* `test_harness_namespace` - Default `lsr-test-harness`
+* `test_harness_sa` - Default `system:serviceaccount:{{ test_harness_namespace }}:tester`
+* `test_harness_need_node_selector` - Default `true`
+* `test_harness_run_as_root` - Default `true`
+* `test_harness_node_selector` - Default `{"system-roles-ci": "true"}`
+* `test_harness_use_staging` - Default `true`
+* `test_harness_use_production` - Default `false`
+
+By default, this will deploy and/or update the staging environment
+since`test_harness_use_staging: true`.  It will also change the
+DeploymentConfig to use the nodeSelector above, and will configure the
+DeploymentConfig to run as root.  If you want to deploy to production, you must
+explicitly set `test_harness_use_production` to `true`.
+
+### Installing CI System manually using OpenShift commands
+
+Make sure you are logged into the OpenShift cluster first:
+
+```
+$ oc login [URL]
+```
+
+Create a fresh OpenShift project:
 
 ```
 $ oc new-project ${PROJECT_NAME} --display-name=${PROJECT_NAME}
@@ -216,7 +273,7 @@ Such account must be present in a list of privileged account. If you are
 a cluster-admin, you can simply type
 
 ```
-$ oc edit scc privileged
+$ oc edit scc $SCC_NAME
 ```
 
 and then add under the `users` list a user with the name `tester`. Please keep
@@ -273,8 +330,8 @@ Now its time to create `ConfigMap` and `Secret` objects. This will create two
 named `secrets`:
 
 ```
-$ oc create configmap config --from-file=${CONFIG_PATH}
-$ oc create configmap config-staging --from-file=${CONFIG_STAGING_PATH}
+$ oc create configmap config --from-file=config.json=${CONFIG_PATH}/config.json
+$ oc create configmap config-staging --from-file=config.json=${CONFIG_PATH}/config-staging.json
 $ oc create secret generic secrets --from-file=${SECRETS_PATH}
 ```
 

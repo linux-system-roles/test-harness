@@ -14,11 +14,31 @@ items:
         - name: latest
           from:
             kind: DockerImage
-            name: docker.io/linuxsystemroles/test-harness
+            name: linux-system-roles:latest
         - name: staging
           from:
             kind: DockerImage
-            name: docker.io/linuxsystemroles/test-harness:staging
+            name: linux-system-roles:staging
+  - kind: BuildConfig
+    apiVersion: v1
+    metadata:
+      name: linux-system-roles
+    spec:
+      output:
+        to:
+          kind: ImageStreamTag
+          name: linux-system-roles:latest
+      resources: {}
+      source:
+        git:
+          uri: https://github.com/linux-system-roles/test-harness
+          ref: master
+        type: Git
+      strategy:
+        type: Docker
+      triggers:
+      - type: ConfigChange
+      - type: ImageChange
   - kind: DeploymentConfig
     apiVersion: v1
     metadata:
@@ -48,7 +68,7 @@ items:
           restartPolicy: Always
           containers:
             - name: linux-system-roles
-              image: docker.io/linuxsystemroles/test-harness
+              image: linux-system-roles:latest
               volumeMounts:
                 - name: secrets
                   mountPath: /secrets
