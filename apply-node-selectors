@@ -1,0 +1,11 @@
+#!/bin/bash
+
+set -ex
+
+oc patch dc $1 -p '
+spec:
+  template:
+    spec:
+      nodeSelector:
+        system-roles-ci: "true"
+'

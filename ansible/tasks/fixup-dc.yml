@@ -1,0 +1,77 @@
+---
+- k8s_info:
+    api_version: v1
+    kind: DeploymentConfig
+    name: "{{ __test_harness_dc }}"
+    namespace: "{{ test_harness_namespace }}"
+  register: register_lsr_staging_dc
+  changed_when: false
+
+- name: Ensure dc has node selector - replace existing
+  command: oc -n {{ test_harness_namespace }} patch dc/{{ __test_harness_dc }} --type json \
+    -p '[{"op":"replace","path":"/spec/template/spec/nodeSelector","value":{{ test_harness_node_selector }} }]'
+  when:
+    - test_harness_need_node_selector|bool
+    - "'nodeSelector' in register_lsr_staging_dc.resources[0].spec.template.spec"
+    - register_lsr_staging_dc.resources[0].spec.template.spec.nodeSelector != test_harness_node_selector
+
+- name: Ensure dc has node selector - add missing
+  command: oc -n {{ test_harness_namespace }} patch dc/{{ __test_harness_dc }} --type json \
+    -p '[{"op":"add","path":"/spec/template/spec/nodeSelector","value":{{ test_harness_node_selector }} }]'
+  when:
+    - test_harness_need_node_selector|bool
+    - "'nodeSelector' not in register_lsr_staging_dc.resources[0].spec.template.spec"
+
+- name: Ensure dc has no fsGroup
+  command: oc -n {{ test_harness_namespace }} patch dc/{{ __test_harness_dc }} --type json \
+    -p '[{"op":"remove","path":"/spec/template/spec/containers/0/securityContext","value":"fsGroup"}]'
+  when:
+    - test_harness_run_as_root|bool
+    - "'fsGroup' in register_lsr_staging_dc.resources[0].spec.template.spec.containers[0].securityContext"
+
+- name: Ensure runAsUser 0 is set - replace existing
+  command: oc -n {{ test_harness_namespace }} patch dc/{{ __test_harness_dc }} --type json \
+    -p '[{"op":"replace","path":"/spec/template/spec/securityContext","value":{"runAsUser":0}}]'
+  when:
+    - test_harness_run_as_root|bool
+    - "'securityContext' in register_lsr_staging_dc.resources[0].spec.template.spec"
+    - "'runAsUser' in register_lsr_staging_dc.resources[0].spec.template.spec.securityContext"
+    - register_lsr_staging_dc.resources[0].spec.template.spec.securityContext.runAsUser != 0
+
+- name: Ensure runAsUser 0 is set - add missing
+  command: oc -n {{ test_harness_namespace }} patch dc/{{ __test_harness_dc }} --type json \
+    -p '[{"op":"add","path":"/spec/template/spec/securityContext","value":{"runAsUser":0}}]'
+  when:
+    - test_harness_run_as_root|bool
+    - "'securityContext' not in register_lsr_staging_dc.resources[0].spec.template.spec"
+    - "'runAsUser' not in register_lsr_staging_dc.resources[0].spec.template.spec.securityContext"
+
+- name: Ensure secret permission set correctly - replace existing
+  command: oc -n {{ test_harness_namespace }} patch dc/{{ __test_harness_dc }} --type json \
+    -p '[{"op":"replace","path":"/spec/template/spec/volumes/0/secret/defaultMode","value":256}]'
+  when:
+    - test_harness_run_as_root|bool
+    - "'defaultMode' in register_lsr_staging_dc.resources[0].spec.template.spec.volumes[0].secret"
+    - register_lsr_staging_dc.resources[0].spec.template.spec.volumes[0].secret.defaultMode != 256
+
+- name: Ensure secret permission set correctly - add missing
+  command: oc -n {{ test_harness_namespace }} patch dc/{{ __test_harness_dc }} --type json \
+    -p '[{"op":"add","path":"/spec/template/spec/volumes/0/secret/defaultMode","value":256}]'
+  when:
+    - test_harness_run_as_root|bool
+    - "'defaultMode' not in register_lsr_staging_dc.resources[0].spec.template.spec.volumes[0].secret"
+
+- name: Ensure config permission set correctly - replace existing
+  command: oc -n {{ test_harness_namespace }} patch dc/{{ __test_harness_dc }} --type json \
+    -p '[{"op":"replace","path":"/spec/template/spec/volumes/1/configMap/defaultMode","value":420}]'
+  when:
+    - test_harness_run_as_root|bool
+    - "'defaultMode' in register_lsr_staging_dc.resources[0].spec.template.spec.volumes[1].configMap"
+    - register_lsr_staging_dc.resources[0].spec.template.spec.volumes[1].configMap.defaultMode != 420
+
+- name: Ensure config permission set correctly - add missing
+  command: oc -n {{ test_harness_namespace }} patch dc/{{ __test_harness_dc }} --type json \
+    -p '[{"op":"add","path":"/spec/template/spec/volumes/1/configMap/defaultMode","value":420}]'
+  when:
+    - test_harness_run_as_root|bool
+    - "'defaultMode' not in register_lsr_staging_dc.resources[0].spec.template.spec.volumes[1].configMap"
