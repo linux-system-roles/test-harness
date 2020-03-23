@@ -1,0 +1,12 @@
+#!/bin/bash
+
+set -ex
+
+oc patch is $1 -p '
+spec:
+  tags:
+    - name: staging
+      from:
+        kind: DockerImage
+        name: linux-system-roles:staging
+'
