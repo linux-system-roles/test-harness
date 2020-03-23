@@ -55,7 +55,7 @@ transient_error_wait_time = TransientErrorWaitTime()
 
 
 def sighandler_exit(signo, frame):
-    print(f"Received {signal.Signals(signo).name}, exiting...", file=sys.stderr)
+    logging.info(f"Received {signal.Signals(signo).name}, exiting...")
     sys.exit(0)
 
 
@@ -69,7 +69,7 @@ def handle_transient_httperrors(error):
     # Handle transient server-side errors
     if error.response.status_code in (500, 502, 503, 504):
         timeout = transient_error_wait_time.next()
-        print(
+        logging.info(
             ">>> Server returned {} {}, waiting {} s...".format(
                 error.response.status_code, error.response.reason, timeout
             )
@@ -88,8 +88,8 @@ def handle_transient_httperrors(error):
                 )
             )
         except ValueError as e:
-            print(
-                'W: Failed to parse date "{}" from headers: {}'.format(
+            logging.warning(
+                'Failed to parse date "{}" from headers: {}'.format(
                     error.response.headers["Date"], e
                 )
             )
@@ -100,7 +100,7 @@ def handle_transient_httperrors(error):
             transient_error_wait_time.next(),
         )
 
-        print(f">>> Rate limiting hit, waiting for {int(timeout)} seconds...")
+        logging.warning("Rate limiting hit, waiting for %s seconds", int(timeout))
         time.sleep(timeout)
     else:
         # If this is error from GitHub, there should be some explanation in response
@@ -110,13 +110,12 @@ def handle_transient_httperrors(error):
         except Exception:
             github_msg = ""
         else:
-            print("W: GitHub: " + github_msg)
+            logging.error("GitHub: %s", github_msg)
 
         if "abuse detection" in github_msg:
             timeout = transient_error_wait_time.next()
-            print(
-                ">>> We have triggered abuse detection, waiting {} s...".format(timeout)
-            )
+            msg = "We have triggered abuse detection, waiting {} s...".format(timeout)
+            logging.warning("%s", msg)
             time.sleep(timeout)
             return True
 
@@ -305,6 +304,9 @@ class Task:
 
         self.id_ = f"pull-{owner}_{repo}-{pull}-{self.head[:7]}-" + image["name"]
 
+    def __str__(self):
+        return f"task {self.owner}/{self.repo}/{self.pull}:{self.image['name']}"
+
     def run(self, artifactsdir, cachedir, inventory=None):
         """
         Runs the task and puts results into @artifactsdir. Returns True if all
@@ -432,6 +434,10 @@ def pull_ok_to_test(gh, owner, repo, pull, author, head):
 
     result = gh.get(f"repos/{owner}/{repo}/collaborators/{author}", check=False)
     if result.status_code == 204:
+        logging.debug(
+            "PR is ok to test - is a collaborator "
+            f"repos/{owner}/{repo}/collaborators/{author}"
+        )
         return True
 
     # Check if a member commented with a command like
@@ -442,11 +448,14 @@ def pull_ok_to_test(gh, owner, repo, pull, author, head):
     for comment in comments:
         if comment["author_association"] == "MEMBER":
             if whitelist_command in comment["body"]:
+                logging.debug("PR is ok to test - whitelisted by member")
                 return True
 
     result = gh.get(f"repos/{owner}/{repo}/issues/{pull}/labels")
     if result.status_code == 200 and "needs-ci" in (x["name"] for x in result.json()):
+        logging.debug("PR is ok to test - has needs-ci label")
         return True
+    logging.debug("PR is not ok to test")
 
 
 def get_statuses(gh, owner, repo, sha):
@@ -511,6 +520,7 @@ def choose_task(gh, repos, images, config):
         pulls = gh.get(f"repos/{owner}/{repo}/pulls").json()
         random.shuffle(pulls)
         for pull in pulls:
+            logging.debug("Evaluating PR {}".format(pull["url"]))
             author = pull["user"]["login"]
             head = pull["head"]["sha"]
             number = pull["number"]
@@ -527,7 +537,18 @@ def choose_task(gh, repos, images, config):
 
                 if check_commit_needs_testing(status, commands):
                     task = Task(owner, repo, number, head, image)
+                    logging.debug(
+                        f"Testing PR {pull['url']} with image {image['source']}"
+                    )
                     return task
+                else:
+                    logging.debug(
+                        f"Not testing PR {pull['url']} with image {image['source']}"
+                    )
+            else:
+                logging.debug("No images to use for testing PR {}".format(pull["url"]))
+        else:
+            logging.debug(f"No pull requests for {owner}/{repo}")
 
 
 def check_commit_needs_testing(status, commands):
@@ -535,14 +556,19 @@ def check_commit_needs_testing(status, commands):
 
     # Check it, if there's no status for it yet
     if not status:
+        logging.debug("PR will be tested because it has no status")
         return True
 
     # or the status is pending without a hostname in the description
     if status["state"] == "pending" and not status.get("description"):
+        logging.debug(
+            "PR will be tested because it is in state 'pending' and has no description"
+        )
         return True
 
     # or a generic re-check was requested:
     if status["updated_at"] < commands[COMMENT_CMD_TEST_ALL]:
+        logging.debug("PR will be tested because it was given comment to test all")
         return True
 
     # or the status is error or failure and a re-check was requested
@@ -550,6 +576,9 @@ def check_commit_needs_testing(status, commands):
         status["state"] in ("failure", "error")
         and status["updated_at"] < commands[COMMENT_CMD_TEST_BAD]
     ):
+        logging.debug(
+            "PR will be tested because it was given comment to retest failing tests"
+        )
         return True
 
     # or the status is pending and a re-check was requested
@@ -557,8 +586,12 @@ def check_commit_needs_testing(status, commands):
         status["state"] == "pending"
         and status["updated_at"] < commands[COMMENT_CMD_TEST_PENDING]
     ):
+        logging.debug(
+            "PR will be tested because it was given comment to retest pending tests"
+        )
         return True
 
+    logging.debug("PR will not be tested because it does not meet criteria")
     return False
 
 
@@ -607,17 +640,20 @@ def handle_task(gh, args, config, task, dry_run=False):
     """ Process a task """
     title = f"{HOSTNAME}: {task.owner}/{task.repo}: pull #{task.pull} "
     title += f'({task.head[:7]}) on {task.image["name"]}'
-    print(">>>", title)
+    logging.info(">>> " + title)
 
     abort = False
 
-    description = HOSTNAME + "@" + str(datetime.datetime.utcnow())
+    start_time = datetime.datetime.utcnow()
+
+    description = HOSTNAME + "@" + str(start_time)
     target_url = None
     state = None
 
     status_context = f"{config['name']}/{task.image['name']}"
 
     if not dry_run:
+        logging.info("Claiming %s", task)
         # When running multiple instances of this script, there's a race
         # between choosing a task and setting the status on GitHub to "pending"
         # (there's no race-free way to only set the status for a context when
@@ -642,16 +678,16 @@ def handle_task(gh, args, config, task, dry_run=False):
             statuses = get_statuses(gh, task.owner, task.repo, task.head)
             status = statuses.get(status_context)
             if status["description"] != description:
-                print(
+                logging.info(
                     f"Skip: another instance is working on this task: "
                     + status["description"]
                 )
-                print()
                 # avoid overwriting status from another instance
                 dry_run = True
                 return
 
-        timestamp = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+        logging.info("Starting %s", task)
+        timestamp = start_time.strftime("%Y%m%d-%H%M%S")
 
         workdir = tempfile.mkdtemp(prefix=f"linux-system-role-test-work-{task.id_}-")
         artifactsdir = f"{workdir}/artifacts"
@@ -689,15 +725,16 @@ def handle_task(gh, args, config, task, dry_run=False):
                 print(traceback.format_exc())
                 state = "error"
                 description += ": Exception when running tests: " + str(e)
+                logging.error(description)
 
         run("chmod", "a+rX", workdir)
 
         local_test_log = f"{artifactsdir}/test.log"
 
         if dry_run:
-            print(f"Artifacts kept at: {artifactsdir}")
+            logging.info(f"Artifacts kept at: {artifactsdir}")
             with open(local_test_log) as test_log:
-                print(test_log.read())
+                logging.info(test_log.read())
         else:
             make_html(local_test_log)
 
@@ -716,6 +753,13 @@ def handle_task(gh, args, config, task, dry_run=False):
             shutil.rmtree(workdir)
 
     finally:
+        duration = (datetime.datetime.utcnow() - start_time).seconds
+        logging.info(
+            "Finished in %d seconds %s: %s",
+            duration,
+            task,
+            state if state and state != "pending" else "abandoned",
+        )
         while not dry_run:
             try:
                 gh.post(
@@ -737,7 +781,7 @@ def handle_task(gh, args, config, task, dry_run=False):
     print()
 
     if abort:
-        print("Fatal exception occured, aborting...")
+        logging.critical("Fatal exception occured, aborting...")
         sys.exit(1)
 
 
@@ -747,12 +791,45 @@ def check_environment():
     Intent here is to fail early for example if /dev/kvm is not available.
     """
     if not os.access("/dev/kvm", os.R_OK | os.W_OK):
-        print("test-harness needs access to /dev/kvm, aborting")
+        logging.critical("test-harness needs access to /dev/kvm, aborting")
         sys.exit(1)
+
+
+def setup_logging(config_logging):
+    log_cfg_default = {
+        "format": "%(asctime)s: %(levelname)s: %(message)s",
+        "datefmt": "%Y-%m-%dT%H:%M:%S%z",
+    }
+    log_cfg = log_cfg_default.copy()
+    log_cfg.update(
+        (k, v)
+        for k, v in config_logging.items()
+        if k in {"format", "style", "datefmt", "level"}
+    )
+
+    try:
+        # Add stderr handler
+        stream_handler = logging.StreamHandler()
+        stream_handler.setLevel(config_logging.get("stderr_level", logging.INFO))
+        handlers = [stream_handler]
+
+        if "filename" in config_logging:
+            # as config may be shared between multiple hosts with shared storage,
+            # we may need hostname in log name
+            filename = config_logging["filename"].replace("HOSTNAME", HOSTNAME)
+            file_handler = logging.FileHandler(filename)
+            file_handler.setLevel(config_logging.get("file_level", logging.NOTSET))
+            handlers.append(file_handler)
+
+        logging.basicConfig(handlers=handlers, **log_cfg)
+    except ValueError:
+        logging.basicConfig(**log_cfg_default)
+        logging.warning("Invalid logging config, using default", exc_info=True)
 
 
 def main():
     signal.signal(signal.SIGTERM, sighandler_exit)
+    print("Starting at {}".format(time.asctime()))
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--secrets", default="/secrets", help="Directory with secrets")
@@ -787,14 +864,6 @@ def main():
 
     args = parser.parse_args()
 
-    check_environment()
-
-    if args.dry_run:
-        token = ""
-    else:
-        with open(args.secrets + "/github-token") as tokenfile:
-            token = tokenfile.read().strip()
-
     # default values for config
     config = {"repositories": [], "images": [], "name": "linux-system-roles-test"}
 
@@ -804,6 +873,16 @@ def main():
         random.shuffle(images)
         repos = [r.split("/") for r in config.get("repositories", [])]
         random.shuffle(repos)
+
+    setup_logging(config.get("logging", {}))
+
+    check_environment()
+
+    if args.dry_run:
+        token = ""
+    else:
+        with open(args.secrets + "/github-token") as tokenfile:
+            token = tokenfile.read().strip()
 
     gh = Session("https://api.github.com")
     gh.headers.update(
@@ -833,6 +912,7 @@ def main():
         time.sleep(random.randint(0, 60))
 
     for pull_request in args.pull_request:
+        logging.debug(f"Processing command line pull request {pull_request}")
         # supports to specify the PR with full URLs or just the path
         parsed_url = urllib.parse.urlparse(pull_request)
         owner, repo, pullnr = (
@@ -865,8 +945,10 @@ def main():
             task = choose_task(gh, repos, images, config)
             if not task:
                 if not printed_waiting:
-                    print(">>> No tasks. Waiting.")
+                    logging.info(">>> No tasks. Waiting.")
                     printed_waiting = True
+                else:
+                    logging.debug(">>> Still no tasks. Waiting.")
                 time.sleep(600)
                 continue
 
