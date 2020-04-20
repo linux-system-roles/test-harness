@@ -809,16 +809,14 @@ def setup_logging(config_logging):
 
     try:
         # Add stderr handler
-        handlers = [
-            logging.StreamHandler(
-                level=config_logging.get("stderr_level", logging.WARNING)
-            )
-        ]
+        stream_handler = logging.StreamHandler()
+        stream_handler.setLevel(config_logging.get("stderr_level", logging.INFO))
+        handlers = [stream_handler]
 
         if "filename" in config_logging:
             # as config may be shared between multiple hosts with shared storage,
             # we may need hostname in log name
-            filename = log_cfg["filename"].replace("HOSTNAME", HOSTNAME)
+            filename = config_logging["filename"].replace("HOSTNAME", HOSTNAME)
             file_handler = logging.FileHandler(filename)
             file_handler.setLevel(config_logging.get("file_level", logging.NOTSET))
             handlers.append(file_handler)
