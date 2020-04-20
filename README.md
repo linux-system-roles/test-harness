@@ -16,6 +16,44 @@ It is also possible to whitelist all commits in a PR with the `needs-ci` tag.
 However, this should be only used with trusted submitters since they can still
 change the commits in the PR.
 
+## Deployment Workflow
+
+To make changes to the CI environment, the changes should be first committed
+to the `staging` branch, and deployed to the `staging` environment.  Once they
+are confirmed to be working, the changes should be merged to the `master`
+branch and deployed to the `production` environment.
+
+Steps:
+
+1. Make changes to `staging` branch.
+2. Git commit.
+3. Git push to your github fork.
+4. Deploy changes to the `staging` environment.
+5. If you want to test changes to the run-tests script that have not been
+   merged into the upstream `staging` branch:
+```
+$ oc edit bc linux-system-roles-staging
+# look for the source.git.ref - change the uri to point to your fork
+$ oc start-build --follow linux-system-roles-staging
+... build logs ...
+# if the build succeeds, a new staging pod should rollout - the
+# dc has a trigger on new images - if not, do this
+$ oc rollout latest dc/linux-system-roles-staging
+```
+6. Test one or more PRs to ensure that the staging changes are working.  Be
+   sure to check the staging pod logs for problems too.
+7. If there are errors in building or testing, repeat from Step 1.
+8. Submit a PR against `test-harness` in github for the `staging` branch.
+9. Once the PR is merged, `git pull` the changes to your local `staging`
+   branch.
+10. Deploy the changes to the `staging` environment.  (If you edited the
+    buildconfig to test your unmerged changes, this step will replace them)
+11. Merge the changes from the `staging` branch to `master` branch and submit
+    a PR against `test-harness` in github for the `master` branch.
+12. Once the PR is merged, `git pull` the changes to your local `master`
+    branch.
+13. Deploy the changes to the `production` environment.
+
 ## Installation
 
 A docker container which runs integration tests for open pull requests on
