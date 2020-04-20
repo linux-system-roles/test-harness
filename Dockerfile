@@ -1,4 +1,4 @@
-FROM docker.io/library/fedora:28
+FROM docker.io/library/fedora:31
 
 RUN dnf update -y && dnf install -y \
     ansible \

@@ -44,7 +44,7 @@ items:
     metadata:
       name: linux-system-roles
     spec:
-      replicas: 1
+      replicas: 8
       selector:
         name: linux-system-roles
       triggers:
