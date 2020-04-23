@@ -219,29 +219,37 @@ $ oc login [URL]
 Then execute the playbook:
 
 ```
-$ ansible-playbook -e test_harness_secrets_dir=$SECRETS_PATH \
-    -e test_harness_config_dir=$CONFIG_PATH \
+$ ansible-playbook [-e test_harness_secrets_dir=$SECRETS_PATH] \
+    [-e test_harness_config_dir=$CONFIG_PATH] \
     -e test_harness_scc=$SCC_NAME \
     ansible/openshift-playbook.yml
 ```
 
 Parameters:
-* `test_harness_secrets_dir` - Required - See `SECRETS_PATH`
-* `test_harness_config_dir` - Required - See `CONFIG_PATH`
+* `test_harness_secrets_dir` - Default
+  `$HOME/rhel-system-roles/test-harness-config/secrets` - See `SECRETS_PATH`
+* `test_harness_config_dir` - Default
+  `$HOME/rhel-system-roles/test-harness-config/config` - See `CONFIG_PATH`
 * `test_harness_scc` - Required - See `SCC_NAME`
 * `test_harness_namespace` - Default `lsr-test-harness`
 * `test_harness_sa` - Default `system:serviceaccount:{{ test_harness_namespace }}:tester`
 * `test_harness_need_node_selector` - Default `true`
 * `test_harness_run_as_root` - Default `true`
 * `test_harness_node_selector` - Default `{"system-roles-ci": "true"}`
-* `test_harness_use_staging` - Default `true`
-* `test_harness_use_production` - Default `false`
+* `test_harness_use_staging` - Default `true` if on the staging branch, `false` otherwise
+* `test_harness_use_production` - Default `false` - Must explicitly set and be
+  on the production/master branch
 
-By default, this will deploy and/or update the staging environment
-since`test_harness_use_staging: true`.  It will also change the
+The environment, staging or production, that will be deployed/updated depends
+on which git branch you have checked out.  If you are on the staging branch
+(currently `staging`), then the playbook will deploy/update the staging
+environment.  If you are on the production branch (currently `master`), and
+have explicitly set `test_harness_use_production` to `true`, then the playbook
+will deploy/update the production environment.  You will get an error if not on
+one of these branches.  You will get an error if you have uncommitted git
+changes (see `git status -uno --porcelain`).  It will also change the
 DeploymentConfig to use the nodeSelector above, and will configure the
-DeploymentConfig to run as root.  If you want to deploy to production, you must
-explicitly set `test_harness_use_production` to `true`.
+DeploymentConfig to run as root.
 
 ### Installing CI System manually using OpenShift commands
 
