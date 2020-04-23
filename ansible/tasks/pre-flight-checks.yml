@@ -1,0 +1,79 @@
+  - name: Ensure python openshift client package is installed
+    package:
+      name: python3-openshift
+      state: present
+    become: true
+
+  - name: See if logged into an OpenShift cluster
+    command: oc whoami
+
+  - name: Get current git branch
+    command: git rev-parse --abbrev-ref HEAD
+    register: test_harness_register_git_branch
+
+  - set_fact:
+      test_harness_git_branch: "{{ test_harness_register_git_branch.stdout }}"
+
+  - name: See if there are unstaged changes on the current branch [{{ test_harness_git_branch }}]
+    command: git status -uno --porcelain
+    register: test_harness_register_git_status
+
+  - fail:
+      msg: You have unstaged changes in your local git branch [{{ test_harness_git_branch }}].  Please commit before deploying.
+    when: test_harness_register_git_status.stdout != ""
+
+  - set_fact:
+      test_harness_secrets_dir: "{{ '$HOME/rhel-system-roles/test-harness-config/secrets' | expandvars }}"
+    when: test_harness_secrets_dir is not defined
+
+  - set_fact:
+      test_harness_config_dir: "{{ '$HOME/rhel-system-roles/test-harness-config/config' | expandvars }}"
+    when: test_harness_config_dir is not defined
+
+  - fail:
+      msg: You may need to set or correct "test_harness_secrets_dir" in your inventory - [{{ test_harness_secrets_dir }}] not found
+    when: not test_harness_secrets_dir is directory
+
+  - fail:
+      msg: You may need to set or correct "test_harness_config_dir" in your inventory - [{{ test_harness_config_dir }}] not found
+    when: not test_harness_config_dir is directory
+
+  - fail:
+      msg: You must set "test_harness_scc" in your inventory
+    when: test_harness_scc is not defined
+
+  - fail:
+      msg: You must be on branch 'staging' or 'master' in order to deploy.  You are currently on branch [{{ test_harness_git_branch }}]
+    when:
+      - not test_harness_git_branch in ["staging", "master"]
+
+  - name: Deploy to staging if on staging branch
+    set_fact:
+      test_harness_use_staging: true
+    when:
+      - test_harness_use_staging is not defined
+      - test_harness_git_branch == "staging"
+
+  - fail:
+      msg: You must be on 'staging' branch to deploy to staging - you are on branch [{{ test_harness_git_branch }}]
+    when:
+      - test_harness_git_branch != "staging"
+      - test_harness_use_staging | d(false)
+
+  - name: Disable deploying to production if deploying to staging or not on master branch
+    set_fact:
+      test_harness_use_production: false
+    when:
+      - test_harness_use_staging | d(false) or test_harness_git_branch != "master"
+
+  - fail:
+      msg: You must explicitly set test_harness_use_production=true (e.g. '-e test_harness_use_production=true') to deploy to production
+    when:
+      - test_harness_git_branch == "master"
+      - not test_harness_use_production | d(false)
+
+  - fail:
+      msg: You must be on 'master' branch to deploy to production - you are on [{{ test_harness_git_branch }}]
+    when:
+      - test_harness_git_branch != "master"
+      - test_harness_use_production | d(false)
