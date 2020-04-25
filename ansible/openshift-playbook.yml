@@ -59,7 +59,7 @@
       __test_harness_ci_obj_file: ../openshift-objects-staging.yml
       __test_harness_dc: linux-system-roles-staging
       __test_harness_bc: linux-system-roles-staging
-    when: test_harness_use_staging | bool
+    when: test_harness_use_staging | d(false) | bool
 
   - name: Ensure production is set up
     include_tasks: tasks/setup-ci-environ.yml
@@ -70,4 +70,4 @@
       __test_harness_ci_obj_file: ../openshift-objects.yml
       __test_harness_dc: linux-system-roles
       __test_harness_bc: linux-system-roles
-    when: test_harness_use_production | bool
+    when: test_harness_use_production | d(false) | bool

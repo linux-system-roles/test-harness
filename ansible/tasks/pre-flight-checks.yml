@@ -58,22 +58,22 @@
       msg: You must be on 'staging' branch to deploy to staging - you are on branch [{{ test_harness_git_branch }}]
     when:
       - test_harness_git_branch != "staging"
-      - test_harness_use_staging | d(false)
+      - test_harness_use_staging | d(false) | bool
 
   - name: Disable deploying to production if deploying to staging or not on master branch
     set_fact:
       test_harness_use_production: false
     when:
-      - test_harness_use_staging | d(false) or test_harness_git_branch != "master"
+      - test_harness_use_staging | d(false) | bool or test_harness_git_branch != "master"
 
   - fail:
       msg: You must explicitly set test_harness_use_production=true (e.g. '-e test_harness_use_production=true') to deploy to production
     when:
       - test_harness_git_branch == "master"
-      - not test_harness_use_production | d(false)
+      - not test_harness_use_production | d(false) | bool
 
   - fail:
-      msg: You must be on 'master' branch to deploy to production - you are on [{{ test_harness_git_branch }}]
+      msg: You must be on 'master' branch to deploy to production - you are on branch [{{ test_harness_git_branch }}]
     when:
       - test_harness_git_branch != "master"
-      - test_harness_use_production | d(false)
+      - test_harness_use_production | d(false) | bool
