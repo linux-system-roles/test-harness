@@ -19,18 +19,18 @@ change the commits in the PR.
 ## Deployment Workflow
 
 To make changes to the CI environment, the changes should be first committed
-to the `staging` branch, and deployed to the `staging` environment.  Once they
-are confirmed to be working, the changes should be merged to the `master`
+to the `master` branch, and deployed to the `staging` environment.  Once they
+are confirmed to be working, the changes should be merged to the `production`
 branch and deployed to the `production` environment.
 
 Steps:
 
-1. Make changes to `staging` branch.
+1. Make changes to `master` branch.
 2. Git commit.
 3. Git push to your github fork.
 4. Deploy changes to the `staging` environment.
 5. If you want to test changes to the run-tests script that have not been
-   merged into the upstream `staging` branch:
+   merged into the upstream `master` branch:
 ```
 $ oc edit bc linux-system-roles-staging
 # look for the source.git.ref - change the uri to point to your fork
@@ -43,14 +43,14 @@ $ oc rollout latest dc/linux-system-roles-staging
 6. Test one or more PRs to ensure that the staging changes are working.  Be
    sure to check the staging pod logs for problems too.
 7. If there are errors in building or testing, repeat from Step 1.
-8. Submit a PR against `test-harness` in github for the `staging` branch.
-9. Once the PR is merged, `git pull` the changes to your local `staging`
+8. Submit a PR against `test-harness` in github for the `master` branch.
+9. Once the PR is merged, `git pull` the changes to your local `master`
    branch.
 10. Deploy the changes to the `staging` environment.  (If you edited the
     buildconfig to test your unmerged changes, this step will replace them)
-11. Merge the changes from the `staging` branch to `master` branch and submit
-    a PR against `test-harness` in github for the `master` branch.
-12. Once the PR is merged, `git pull` the changes to your local `master`
+11. Merge the changes from the `master` branch to `production` branch and
+    submit a PR against `test-harness` in github for the `production` branch.
+12. Once the PR is merged, `git pull` the changes to your local `production`
     branch.
 13. Deploy the changes to the `production` environment.
 
@@ -242,14 +242,14 @@ Parameters:
 
 The environment, staging or production, that will be deployed/updated depends
 on which git branch you have checked out.  If you are on the staging branch
-(currently `staging`), then the playbook will deploy/update the staging
-environment.  If you are on the production branch (currently `master`), and
-have explicitly set `test_harness_use_production` to `true`, then the playbook
-will deploy/update the production environment.  You will get an error if not on
-one of these branches.  You will get an error if you have uncommitted git
-changes (see `git status -uno --porcelain`).  It will also change the
-DeploymentConfig to use the nodeSelector above, and will configure the
-DeploymentConfig to run as root.
+(currently `master`), then the playbook will deploy/update the staging
+environment.  If you are on the production branch (currently `production`),
+and have explicitly set `test_harness_use_production` to `true`, then the
+playbook will deploy/update the production environment.  You will get an error
+if not on one of these branches.  You will get an error if you have
+uncommitted git changes (see `git status -uno --porcelain`).  It will also
+change the DeploymentConfig to use the nodeSelector above, and will configure
+the DeploymentConfig to run as root.
 
 ### Installing CI System manually using OpenShift commands
 
