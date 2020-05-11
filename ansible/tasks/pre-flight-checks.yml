@@ -1,8 +1,11 @@
-  - name: Ensure python openshift client package is installed
-    package:
-      name: python3-openshift
-      state: present
-    become: true
+  - name: See if python openshift client package is installed
+    command: rpm -q python3-openshift
+    ignore_errors: true
+    register: test_harness_register_pyoc
+
+  - fail:
+      msg: You must install the python3-openshift package in order to use the k8s modules e.g. on Fedora 'sudo dnf -y install python3-openshift'
+    when: test_harness_register_pyoc is failed
 
   - name: See if logged into an OpenShift cluster
     command: oc whoami
@@ -43,37 +46,37 @@
     when: test_harness_scc is not defined
 
   - fail:
-      msg: You must be on branch 'staging' or 'master' in order to deploy.  You are currently on branch [{{ test_harness_git_branch }}]
+      msg: You must be on branch 'production' or 'master' in order to deploy.  You are currently on branch [{{ test_harness_git_branch }}]
     when:
-      - not test_harness_git_branch in ["staging", "master"]
+      - not test_harness_git_branch in ["production", "master"]
 
-  - name: Deploy to staging if on staging branch
+  - name: Deploy to staging if on master branch
     set_fact:
       test_harness_use_staging: true
     when:
       - test_harness_use_staging is not defined
-      - test_harness_git_branch == "staging"
+      - test_harness_git_branch == "master"
 
   - fail:
-      msg: You must be on 'staging' branch to deploy to staging - you are on branch [{{ test_harness_git_branch }}]
+      msg: You must be on 'master' branch to deploy to staging - you are on branch [{{ test_harness_git_branch }}]
     when:
-      - test_harness_git_branch != "staging"
+      - test_harness_git_branch != "master"
       - test_harness_use_staging | d(false) | bool
 
-  - name: Disable deploying to production if deploying to staging or not on master branch
+  - name: Disable deploying to production if deploying to staging or not on production branch
     set_fact:
       test_harness_use_production: false
     when:
-      - test_harness_use_staging | d(false) | bool or test_harness_git_branch != "master"
+      - test_harness_use_staging | d(false) | bool or test_harness_git_branch != "production"
 
   - fail:
       msg: You must explicitly set test_harness_use_production=true (e.g. '-e test_harness_use_production=true') to deploy to production
     when:
-      - test_harness_git_branch == "master"
+      - test_harness_git_branch == "production"
       - not test_harness_use_production | d(false) | bool
 
   - fail:
-      msg: You must be on 'master' branch to deploy to production - you are on branch [{{ test_harness_git_branch }}]
+      msg: You must be on 'production' branch to deploy to production - you are on branch [{{ test_harness_git_branch }}]
     when:
-      - test_harness_git_branch != "master"
+      - test_harness_git_branch != "production"
       - test_harness_use_production | d(false) | bool

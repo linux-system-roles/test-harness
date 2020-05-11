@@ -14,7 +14,7 @@ items:
       source:
         git:
           uri: https://github.com/linux-system-roles/test-harness
-          ref: staging
+          ref: master
         type: Git
       strategy:
         type: Docker
