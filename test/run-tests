@@ -679,8 +679,8 @@ def handle_task(gh, args, config, task, dry_run=False):
             status = statuses.get(status_context)
             if status["description"] != description:
                 logging.info(
-                    f"Skip: another instance is working on this task: "
-                    + status["description"]
+                    "Skip: another instance is working on this task: "
+                    f"{status['description']}"
                 )
                 # avoid overwriting status from another instance
                 dry_run = True
