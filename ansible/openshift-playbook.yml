@@ -10,8 +10,11 @@
       system-roles-ci: "true"
   tasks:
 
+  - name: Openshift pre-flight checks
+    include_tasks: tasks/pre-flight-checks-openshift.yml
+
   - name: Pre-flight checks
-    include_tasks: tasks/pre-flight-checks.yml
+    include_tasks: tasks/pre-flight-checks-general.yml
 
   # hmm - may need admin access for this
   - name: Ensure testing namespace is present

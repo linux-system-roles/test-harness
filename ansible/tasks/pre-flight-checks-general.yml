@@ -1,15 +1,3 @@
-  - name: See if python openshift client package is installed
-    command: rpm -q python3-openshift
-    ignore_errors: true
-    register: test_harness_register_pyoc
-
-  - fail:
-      msg: You must install the python3-openshift package in order to use the k8s modules e.g. on Fedora 'sudo dnf -y install python3-openshift'
-    when: test_harness_register_pyoc is failed
-
-  - name: See if logged into an OpenShift cluster
-    command: oc whoami
-
   - name: Get current git branch
     command: git rev-parse --abbrev-ref HEAD
     register: test_harness_register_git_branch
