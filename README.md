@@ -16,6 +16,32 @@ It is also possible to whitelist all commits in a PR with the `needs-ci` tag.
 However, this should be only used with trusted submitters since they can still
 change the commits in the PR.
 
+## Git workflow
+
+1. Merge pull requests to master without merge commits to keep a less
+   cluttered history.
+1. Make sure that `production` is always an ancestor of `master` (or
+   equivalent to `master`). Having `production` as a side branch and
+   continuously merging from `master` would lead to a complicated
+   history and also would not ensure that `production` is in a state
+   that was previously tested on `master`.
+
+Ad 1: when you want to merge a PR, fetch the branch with the PR,
+checkout `master` and merge the branch using `git merge` with
+`--ff-only`. This will refuse to merge the branch if not up-to-date,
+in this case, rebase it first to `master`.
+
+Example for PR #85: if you have the branch to be merged
+(`ukulekek-pre-flight-checks-openshift`) checked out aready, do
+```sh
+git checkout master
+git merge --ff-only ukulekek-pre-flight-checks-openshift
+git push origin master
+```
+
+Ad 2: When updating `production` to `master`, reset it to `master`, or
+fast-forward it to `master` (using `merge` with `--ff-only`).
+
 ## Deployment Workflow
 
 To make changes to the CI environment, the changes should be first committed
