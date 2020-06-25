@@ -21,6 +21,27 @@ items:
       triggers:
       - type: ConfigChange
       - type: ImageChange
+  - kind: BuildConfig
+    apiVersion: v1
+    metadata:
+      name: linux-system-roles-centos7-staging
+    spec:
+      output:
+        to:
+          kind: ImageStreamTag
+          name: linux-system-roles-centos7:staging
+      resources: {}
+      source:
+        git:
+          uri: https://github.com/linux-system-roles/test-harness
+          ref: master
+        type: Git
+      strategy:
+        dockerStrategy:
+          dockerfilePath: Dockerfile.centos7
+      triggers:
+      - type: ConfigChange
+      - type: ImageChange
   - kind: DeploymentConfig
     apiVersion: v1
     metadata:
@@ -51,6 +72,57 @@ items:
           containers:
             - name: linux-system-roles-staging
               image: linux-system-roles:staging
+              volumeMounts:
+                - name: secrets
+                  mountPath: /secrets
+                  readOnly: true
+                - name: config
+                  mountPath: /config
+                  readOnly: true
+                - name: cache
+                  mountPath: /cache
+              securityContext:
+                privileged: true
+                fsGroup: 1000
+          volumes:
+            - name: secrets
+              secret:
+                secretName: secrets
+            - name: config
+              configMap:
+                name: config-staging
+            - name: cache
+              emptyDir:
+  - kind: DeploymentConfig
+    apiVersion: v1
+    metadata:
+      name: linux-system-roles-centos7-staging
+    spec:
+      replicas: 1
+      selector:
+        name: linux-system-roles-staging
+      triggers:
+        - type: ConfigChange
+        - type: ImageChange
+          imageChangeParams:
+            automatic: true
+            containerNames:
+              - linux-system-roles-centos7-staging
+            from:
+              kind: ImageStreamTag
+              name: linux-system-roles-centos7:staging
+      strategy:
+        type: Rolling
+      template:
+        metadata:
+          labels:
+            name: linux-system-roles-centos7-staging
+        spec:
+          serviceAccountName: tester
+          restartPolicy: Always
+          containers:
+            - name: linux-system-roles-centos7-staging
+              image: linux-system-roles-centos7:staging
               volumeMounts:
                 - name: secrets
                   mountPath: /secrets

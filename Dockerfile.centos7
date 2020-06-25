@@ -1,0 +1,23 @@
+FROM centos:7
+
+RUN yum update -y && PKGS="centos-release-ansible-27 centos-release-scl-rh" && \
+    yum install -y $PKGS && rpm -V $PKGS && \
+    PKGS="ansible epel-release" && yum install -y $PKGS && rpm -V $PKGS && \
+    PKGS="rh-git218 python3-pip standard-test-roles python2-fmf seabios-bin" && \
+    yum -y install $PKGS && rpm -V $PKGS && \
+    yum clean all && \
+    pip3 install cachecontrol
+
+RUN curl -L -o /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.2/dumb-init_1.2.2_x86_64
+RUN chmod +x /usr/local/bin/dumb-init
+
+RUN useradd -m tester
+USER tester
+
+COPY test /test
+
+VOLUME /config /secrets /cache
+
+WORKDIR /home/tester
+ENTRYPOINT ["/usr/local/bin/dumb-init", "--"]
+CMD ["scl", "enable", "rh-git218", "/test/run-tests"]
