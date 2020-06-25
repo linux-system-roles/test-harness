@@ -28,6 +28,11 @@ import cachecontrol
 import cachecontrol.heuristics
 import yaml
 
+# this is what Ansible uses for version comparison
+# use LooseVersion to handle alphas, betas, other pre-release versions
+from distutils.version import LooseVersion
+from distutils.util import strtobool
+
 HOSTNAME = socket.gethostname()
 
 COMMENT_CMD_TEST_ALL = "[citest]"
@@ -199,7 +204,7 @@ class DontCacheStatuses(cachecontrol.heuristics.BaseHeuristic):
         pass
 
 
-def run(*argv, env=None, check=True, cwd=None):
+def run(*argv, env=None, check=True, cwd=None, return_stdout=False):
     """
     Small wrapper around subprocess.run(), which prints the command to be
     executed and raises an exception by default.
@@ -216,9 +221,18 @@ def run(*argv, env=None, check=True, cwd=None):
         runenv.update(env)
 
     print("+ " + cwdrepr + envrepr + " ".join(shlex.quote(a) for a in argv))
+    stdout_val = sys.stdout
+    if return_stdout:
+        stdout_val = subprocess.PIPE
 
     return subprocess.run(
-        argv, env=runenv, check=check, stdout=sys.stdout, stderr=sys.stderr, cwd=cwd
+        argv,
+        env=runenv,
+        check=check,
+        stdout=stdout_val,
+        stderr=sys.stderr,
+        cwd=cwd,
+        encoding="utf-8",
     )
 
 
@@ -504,7 +518,15 @@ def get_comment_commands(gh, owner, repo, pullnr):
     return commands
 
 
-def choose_task(gh, repos, images, config):
+def get_status_context(variant, image_name, ansible_id):
+    if variant:
+        suffix = f" ({variant})"
+    else:
+        suffix = ""
+    return f"{image_name}/{ansible_id}{suffix}"
+
+
+def choose_task(gh, repos, images, config, ansible_id, variant):
     """
     Collect tasks from open pull requests (one task for each image
     and each open pull).
@@ -532,7 +554,7 @@ def choose_task(gh, repos, images, config):
             commands = get_comment_commands(gh, owner, repo, number)
 
             for image in images:
-                status_context = f"{config['name']}/{image['name']}"
+                status_context = get_status_context(variant, image["name"], ansible_id)
                 status = statuses.get(status_context)
 
                 if check_commit_needs_testing(status, commands):
@@ -636,7 +658,7 @@ def make_html(source_file):
     return html_file
 
 
-def handle_task(gh, args, config, task, dry_run=False):
+def handle_task(gh, args, config, task, ansible_id, dry_run=False):
     """ Process a task """
     title = f"{HOSTNAME}: {task.owner}/{task.repo}: pull #{task.pull} "
     title += f'({task.head[:7]}) on {task.image["name"]}'
@@ -650,7 +672,7 @@ def handle_task(gh, args, config, task, dry_run=False):
     target_url = None
     state = None
 
-    status_context = f"{config['name']}/{task.image['name']}"
+    status_context = get_status_context(args.variant, task.image["name"], ansible_id)
 
     if not dry_run:
         logging.info("Claiming %s", task)
@@ -750,7 +772,8 @@ def handle_task(gh, args, config, task, dry_run=False):
                     description += ": Error uploading results"
 
             # FIXME: workdir might be kept when python crashes
-            shutil.rmtree(workdir)
+            if not args.keep_results:
+                shutil.rmtree(workdir)
 
     finally:
         duration = (datetime.datetime.utcnow() - start_time).seconds
@@ -827,45 +850,86 @@ def setup_logging(config_logging):
         logging.warning("Invalid logging config, using default", exc_info=True)
 
 
+def get_ansible_version():
+    """determine the version of Ansible"""
+    rs = run("ansible", "--version", return_stdout=True)
+    return rs.stdout.split()[1]
+
+
 def main():
     signal.signal(signal.SIGTERM, sighandler_exit)
     print("Starting at {}".format(time.asctime()))
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--secrets", default="/secrets", help="Directory with secrets")
     parser.add_argument(
-        "--config", default="/config", help="Directory with config.json"
+        "--secrets",
+        default=os.environ.get("TEST_HARNESS_SECRETS", "/secrets"),
+        help="Directory with secrets",
     )
     parser.add_argument(
-        "--cache", default="/cache", help="Directory for caching VM images"
+        "--config",
+        default=os.environ.get("TEST_HARNESS_CONFIG", "/config"),
+        help="Directory with config.json",
+    )
+    parser.add_argument(
+        "--cache",
+        default=os.environ.get("TEST_HARNESS_CACHE", "/cache"),
+        help="Directory for caching VM images",
     )
     parser.add_argument(
         "--inventory",
+        default=os.environ.get(
+            "TEST_HARNESS_INVENTORY",
+            "/usr/share/ansible/inventory/standard-inventory-qcow2",
+        ),
         help="Inventory to use for VMs",
-        default="/usr/share/ansible/inventory/standard-inventory-qcow2",
     )
+    default_pull_request = os.environ.get("TEST_HARNESS_PULL_REQUEST", None)
+    if default_pull_request:
+        default_pull_request = default_pull_request.split(",")
     parser.add_argument(
         "pull_request",
         nargs="*",
-        default=None,
+        default=default_pull_request,
         help="Pull requests to test. Example: " "linux-system-roles/network/1",
     )
     parser.add_argument(
         "--use-images",
-        default="*",
-        help="Test pull request only against images matching this pattern",
+        default=os.environ.get("TEST_HARNESS_USE_IMAGES", "*"),
+        help=(
+            "Test pull request only against images matching these patterns.  "
+            "This is a comma delimited list of fnmatch patterns which will be "
+            "applied to each image name and source.  If any of the patterns "
+            "match the name or source, the image will be included in testing."
+        ),
     )
     parser.add_argument(
         "--dry-run",
-        help="Do not update pull request status or upload artifacts",
-        default=False,
+        default=bool(strtobool(os.environ.get("TEST_HARNESS_DRY_RUN", "False"))),
         action="store_true",
+        help="Do not update pull request status or upload artifacts",
+    )
+    parser.add_argument(
+        "--keep-results",
+        default=bool(strtobool(os.environ.get("TEST_HARNESS_KEEP_RESULTS", "False"))),
+        action="store_true",
+        help="For debugging - do not remove the temp results directory",
+    )
+    parser.add_argument(
+        "--variant",
+        default=os.environ.get("TEST_HARNESS_VARIANT", ""),
+        help="Use this variant for PR test status e.g. staging",
+    )
+    parser.add_argument(
+        "--repositories",
+        default=os.environ.get("TEST_HARNESS_REPOSITORIES", None),
+        help="Comma delimited list of repositories to override config",
     )
 
     args = parser.parse_args()
 
     # default values for config
-    config = {"repositories": [], "images": [], "name": "linux-system-roles-test"}
+    config = {"repositories": [], "images": []}
 
     with open(args.config + "/config.json") as configfile:
         config.update(json.load(configfile))
@@ -874,10 +938,62 @@ def main():
         repos = [r.split("/") for r in config.get("repositories", [])]
         random.shuffle(repos)
 
+    # this is used in PR status - context name
+    if not args.variant:
+        if "variant" not in config:
+            # legacy support for old configs that still use "name"
+            if config.get("name") == "linux-system-roles-test-staging":
+                args.variant = "staging"
+        else:
+            args.variant = config["variant"]
+
+    if args.repositories:
+        repos = [r.split("/") for r in args.repositories.split(",")]
     setup_logging(config.get("logging", {}))
 
     check_environment()
 
+    ansible_version = LooseVersion(get_ansible_version())
+    logging.info("Using Ansible version {}".format(ansible_version))
+    # this is used in PR status - context name
+    ansible_id = f"ansible-{ansible_version.version[0]}.{ansible_version.version[1]}"
+
+    image_patterns = args.use_images.split(",")
+    # copy all images to test_images . . .
+    test_images = dict([(image["name"], image) for image in images])
+    # . . . then remove the ones that do not match the criteria
+    for image in images:
+        min_ansible_version = LooseVersion(image.get("min_ansible_version", "0"))
+        if ansible_version < min_ansible_version:
+            if image["name"] in test_images:
+                logging.debug(
+                    f"Image {image['name']} will not be used for testing because "
+                    f"the minimum Ansible version {min_ansible_version} required "
+                    f"by the image is greater than the version {ansible_version} "
+                    "of Ansible used by the test."
+                )
+                del test_images[image["name"]]
+            continue
+        pattern_matched = False
+        for pattern in image_patterns:
+            if fnmatch.fnmatch(image["name"], pattern) or fnmatch.fnmatch(
+                image["source"], pattern
+            ):
+                pattern_matched = True
+                break
+        if not pattern_matched:
+            if image["name"] in test_images:
+                logging.debug(
+                    f"Image {image['name']} will not be used for testing "
+                    "because neither the name nor the source match any "
+                    f"of the image patterns in {image_patterns}"
+                )
+                del test_images[image["name"]]
+
+    logging.info(
+        f"Will test with the following image names: {list(test_images.keys())}"
+    )
+    test_images = list(test_images.values())
     if args.dry_run:
         token = ""
     else:
@@ -926,23 +1042,13 @@ def main():
             head = pull["head"]["sha"]
         number = pull["number"]
 
-        image_patterns = args.use_images.split(",")
-        test_images = []
-        for pattern in image_patterns:
-            for image in images:
-                if fnmatch.fnmatch(image["name"], pattern) or fnmatch.fnmatch(
-                    image["source"], pattern
-                ):
-                    if image not in test_images:
-                        test_images.append(image)
-
         for image in test_images:
             task = Task(owner, repo, number, head, image)
-            handle_task(gh, args, config, task, args.dry_run)
+            handle_task(gh, args, config, task, ansible_id, args.dry_run)
 
     while not args.pull_request:
         try:
-            task = choose_task(gh, repos, images, config)
+            task = choose_task(gh, repos, test_images, config, ansible_id, args.variant)
             if not task:
                 if not printed_waiting:
                     logging.info(">>> No tasks. Waiting.")
@@ -952,7 +1058,7 @@ def main():
                 time.sleep(600)
                 continue
 
-            handle_task(gh, args, config, task, args.dry_run)
+            handle_task(gh, args, config, task, ansible_id, args.dry_run)
         except requests.exceptions.HTTPError as err:
             if not handle_transient_httperrors(err):
                 raise

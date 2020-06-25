@@ -21,7 +21,9 @@ change the commits in the PR.
 To make changes to the CI environment, the changes should be first committed
 to the `master` branch, and deployed to the `staging` environment.  Once they
 are confirmed to be working, the changes should be merged to the `production`
-branch and deployed to the `production` environment.
+branch and deployed to the `production` environment.  For the centos7 based
+tests, use `linux-system-roles-centos7` for production and use
+`linux-system-roles-centos7-staging` for staging.
 
 Steps:
 
@@ -106,6 +108,7 @@ accessible URL for these results. For example:
       "name": "fedora-28",
       "source": "https://download.fedoraproject.org/pub/fedora/linux/releases/28/Cloud/x86_64/images/Fedora-Cloud-Base-28-1.1.x86_64.qcow2",
       "upload_results": true,
+      "min_ansible_version": "2.7",
       "setup": [
         {
           "name": "Setup",
@@ -149,6 +152,20 @@ The `setup` key contains either a list of Ansible plays which will be saved as
 a playbook and executed before the test run, or a single shell command which
 will be executed using the Ansible `raw` module (so the two examples above are
 exactly equivalent).
+
+Use the `min_ansible_version` key to indicate the minimum version of ansible
+that can be used.  For example, if you need to use ansible version 2.8 or
+later to manage Fedora 32 hosts, use something like this:
+```json
+    {
+      "name": "fedora-32",
+      "source": "http://download.fedoraproject.org/pub/fedora/linux/releases/32/Cloud/x86_64/images/Fedora-Cloud-Base-32-1.6.x86_64.qcow2",
+      "upload_results": true,
+      "min_ansible_version": "2.8"
+    },
+```
+This means the CI environment will run tests using only ansible 2.8 or later
+to manage Fedora 32 hosts.
 
 The container needs a `/secrets` mount, which must contain these files:
 
@@ -439,4 +456,34 @@ NAME                                  READY     STATUS       RESTARTS   AGE
 linux-system-roles-12-ddtrs           1/1       Running      57         55d
 ...
 $ oc exec linux-system-roles-12-ddtrs -- cat /var/log/test-harness_linux-system-roles-12-ddtrs.log
+```
+
+## run-tests Command Line Args and Environment Variables
+
+The `run-tests` script can be controlled via command line arguments,
+environment variables, and the config.json config file.  When running in a pod
+in a Kubernetes/OpenShift environment, the easiest way to customize the pod is
+via environment variables.  The environment variables correspond to the
+command line arguments to `run-tests`. In general, the name of the environment
+variable is the name of the command line argument, in all upper case, with `_`
+instead of `-`, and with the prefix `TEST_HARNESS_`.  For example, the command
+line option `--use-images` can be set via the env. var.
+`TEST_HARNESS_USE_IMAGES`.  See `run-tests` usage for the complete list.
+
+The precedence is:
+* command line args are highest precedence
+* environment variables are next highest
+* settings in the config.json file are next highest
+* defaults are lowest precedence
+
+For example, in a running OpenShift cluster, if you wanted to use a custom
+variant in the string used for the PR status:
+```
+oc set env dc/linux-system-roles-staging TEST_HARNESS_VARIANT=my_custom_name
+```
+This will cause the staging pods to be redeployed and use `my_custom_name` for
+the PR status reporting string e.g. `centos-7/ansible-29 (my_custom_name)`.
+To reset:
+```
+oc set env dc/linux-system-roles-staging TEST_HARNESS_VARIANT-
 ```
