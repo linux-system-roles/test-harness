@@ -32,6 +32,7 @@ import yaml
 # use LooseVersion to handle alphas, betas, other pre-release versions
 from distutils.version import LooseVersion
 from distutils.util import strtobool
+from github import Github
 
 HOSTNAME = socket.gethostname()
 
@@ -439,98 +440,68 @@ class Task:
             return True
 
 
-def pull_ok_to_test(gh, owner, repo, pull, author, head):
+def pull_ok_to_test(pyghrepo, pyghpull, author, head):
     """
     Returns True if we trust the pull request enough to run its code. It must
     either come from a collaborator of the repository (a github user with push
     access) or be marked with the "needs-ci" tag by a collaborator.
     """
 
-    result = gh.get(f"repos/{owner}/{repo}/collaborators/{author}", check=False)
-    if result.status_code == 204:
-        logging.debug(
-            "PR is ok to test - is a collaborator "
-            f"repos/{owner}/{repo}/collaborators/{author}"
-        )
+    if pyghrepo.has_in_collaborators(author):
+        logging.debug(f"PR is ok to test - {author} is a collaborator")
         return True
 
     # Check if a member commented with a command like
     # ci-check-commit:<commit-hash>
     # to allow to check this commit
-    comments = get_comments(gh, owner, repo, pull)
+    comments = pyghpull.get_issue_comments()
     whitelist_command = f"[citest commit:{head}]"
     for comment in comments:
-        if comment["author_association"] == "MEMBER":
-            if whitelist_command in comment["body"]:
+        if comment.raw_data["author_association"] == "MEMBER":
+            if whitelist_command in comment.body:
                 logging.debug("PR is ok to test - whitelisted by member")
                 return True
 
-    result = gh.get(f"repos/{owner}/{repo}/issues/{pull}/labels")
-    if result.status_code == 200 and "needs-ci" in (x["name"] for x in result.json()):
-        logging.debug("PR is ok to test - has needs-ci label")
-        return True
+    labels = pyghpull.get_labels()
+    for label in labels:
+        if "needs-ci" in label.name:
+            logging.debug("PR is ok to test - has needs-ci label")
+            return True
+
     logging.debug("PR is not ok to test")
+    return False
 
 
-def get_statuses(gh, owner, repo, sha, max_num_statuses):
+def get_statuses(commits):
     """
     Fetches all statuses of the given commit in a repository and returns a dict
     mapping context to its most recent status.
     Will return at most max_num_statuses.   By default, github will return 30, but
     some of our PRs have more than that.
     """
-    # https://developer.github.com/v3/repos/statuses/#get-the-combined-status-for-a-specific-ref
-    status = gh.get(
-        f"repos/{owner}/{repo}/commits/{sha}/status?per_page={max_num_statuses}"
-    ).json()
-    if status["total_count"] > len(status["statuses"]):
-        # error - there are too many statuses
-        if max_num_statuses <= len(status["statuses"]):
-            logging.error(
-                f"Total number of statuses {status['total_count']} exceeds "
-                f"max_num_statuses {max_num_statuses} statuses for "
-                f"{owner}/{repo}/commits/{sha} - please increase max_num_statuses"
-            )
-        else:
-            # hit hard limit - will have to use paging :-(
-            logging.error(
-                f"Total number of statuses {status['total_count']} exceeds "
-                f"max_num_statuses {max_num_statuses} statuses for "
-                f"{owner}/{repo}/commits/{sha} - need to use paging"
-            )
-    return {x["context"]: x for x in status["statuses"]}
+    statues = []
+    for commit in commits:
+        sts = commit.get_statuses().reversed
+        for st in sts:
+            statues.append(st)
+    return {x.context: x for x in statues}
 
 
-def get_comments(gh, owner, repo, pullnr, after=""):
-    """ Get comments for a pull request, optionally after a certain time """
-    result = gh.get(f"repos/{owner}/{repo}/issues/{pullnr}/comments")
-    comments = []
-    if result.status_code == 200:
-        comments = result.json()
-
-    new_comments = []
-    for comment in comments:
-        comment_update = comment["updated_at"]
-        if comment_update > after:
-            new_comments.append(comment)
-    comments = new_comments
-
-    return comments
-
-
-def get_comment_commands(gh, owner, repo, pullnr):
-    """ Returns dict with last occurence of each command """
+def get_comment_commands(pyghpull):
+    """ Returns dict with last occurrence of each command """
     commands = {
         COMMENT_CMD_TEST_ALL: "",
         COMMENT_CMD_TEST_BAD: "",
         COMMENT_CMD_TEST_PENDING: "",
     }
-    comments = get_comments(gh, owner, repo, pullnr)
+    comments = pyghpull.get_issue_comments()
 
     for comment in comments:
         for command in commands:
-            if command in comment["body"] and commands[command] < comment["updated_at"]:
-                commands[command] = comment["updated_at"]
+            if command in comment.body and commands[
+                command
+            ] < comment.updated_at.strftime("%Y%m%d-%H%M%S"):
+                commands[command] = comment.updated_at.strftime("%Y%m%d-%H%M%S")
 
     return commands
 
@@ -556,38 +527,39 @@ def choose_task(gh, repos, images, config, ansible_id, args):
     """
 
     for owner, repo in repos:
-        pulls = gh.get(f"repos/{owner}/{repo}/pulls").json()
+        pyghrepo = gh.get_repo(f"{owner}/{repo}")
+        pulls = [pr for pr in pyghrepo.get_pulls(state="open")]
         random.shuffle(pulls)
         for pull in pulls:
-            logging.debug("Evaluating PR {}".format(pull["url"]))
-            author = pull["user"]["login"]
-            head = pull["head"]["sha"]
-            number = pull["number"]
+            logging.debug(f"Evaluating PR pull {pull.url}")
+            author = pull.user.login
+            head = pull.head.sha
+            number = pull.number
 
-            if not pull_ok_to_test(gh, owner, repo, number, author, head):
+            if not pull_ok_to_test(pyghrepo, pull, author, head):
                 continue
 
-            statuses = get_statuses(gh, owner, repo, head, args.max_num_statuses)
-            commands = get_comment_commands(gh, owner, repo, number)
+            statuses = get_statuses(pull.get_commits())
+            commands = get_comment_commands(pull)
 
             for image in images:
                 status_context = get_status_context(
                     args.variant, image["name"], ansible_id
                 )
-                status = statuses.get(status_context)
-
+                if status_context in statuses.keys():
+                    status = statuses[status_context]
+                else:
+                    status = {}
                 if check_commit_needs_testing(status, commands):
                     task = Task(owner, repo, number, head, image)
-                    logging.debug(
-                        f"Testing PR {pull['url']} with image {image['source']}"
-                    )
+                    logging.debug(f"Testing PR {pull.url} with image {image['source']}")
                     return task
                 else:
                     logging.debug(
-                        f"Not testing PR {pull['url']} with image {image['source']}"
+                        f"Not testing PR {pull.url} with image {image['source']}"
                     )
             else:
-                logging.debug("No images to use for testing PR {}".format(pull["url"]))
+                logging.debug("No images to use for testing PR {}".format(pull.url))
         else:
             logging.debug(f"No pull requests for {owner}/{repo}")
 
@@ -601,21 +573,21 @@ def check_commit_needs_testing(status, commands):
         return True
 
     # or the status is pending without a hostname in the description
-    if status["state"] == "pending" and not status.get("description"):
+    if status.state == "pending" and not status.description:
         logging.debug(
             "PR will be tested because it is in state 'pending' and has no description"
         )
         return True
 
     # or a generic re-check was requested:
-    if status["updated_at"] < commands[COMMENT_CMD_TEST_ALL]:
+    if status.updated_at.strftime("%Y%m%d-%H%M%S") < commands[COMMENT_CMD_TEST_ALL]:
         logging.debug("PR will be tested because it was given comment to test all")
         return True
 
     # or the status is error or failure and a re-check was requested
     if (
-        status["state"] in ("failure", "error")
-        and status["updated_at"] < commands[COMMENT_CMD_TEST_BAD]
+        status.state in ("failure", "error")
+        and status.updated_at.strftime("%Y%m%d-%H%M%S") < commands[COMMENT_CMD_TEST_BAD]
     ):
         logging.debug(
             "PR will be tested because it was given comment to retest failing tests"
@@ -624,8 +596,9 @@ def check_commit_needs_testing(status, commands):
 
     # or the status is pending and a re-check was requested
     if (
-        status["state"] == "pending"
-        and status["updated_at"] < commands[COMMENT_CMD_TEST_PENDING]
+        status.state == "pending"
+        and status.updated_at.strftime("%Y%m%d-%H%M%S")
+        < commands[COMMENT_CMD_TEST_PENDING]
     ):
         logging.debug(
             "PR will be tested because it was given comment to retest pending tests"
@@ -707,23 +680,22 @@ def handle_task(gh, args, config, task, ansible_id, dry_run=False):
         # we wake up, we know that nobody else wants to do the same task and
         # can go ahead. Otherwise, choose something else.
 
-        gh.post(
-            f"repos/{task.owner}/{task.repo}/statuses/{task.head}",
-            {"context": status_context, "state": "pending", "description": description},
+        commit = gh.get_repo(f"{task.owner}/{task.repo}").get_commit(task.head)
+        commit.create_status(
+            state="pending", context=status_context, description=description
         )
 
     try:
         if not dry_run:
             time.sleep(random.randint(5, 20))
 
-            statuses = get_statuses(
-                gh, task.owner, task.repo, task.head, args.max_num_statuses
-            )
-            status = statuses.get(status_context)
-            if status["description"] != description:
+            pull = gh.get_repo(f"{task.owner}/{task.repo}").get_pull(task.pull)
+            statuses = get_statuses(pull.get_commits())
+            status = statuses[status_context]
+            if status.description != description:
                 logging.info(
                     "Skip: another instance is working on this task: "
-                    f"{status['description']}"
+                    f"{status.description} != {description}"
                 )
                 # avoid overwriting status from another instance
                 dry_run = True
@@ -806,16 +778,12 @@ def handle_task(gh, args, config, task, ansible_id, dry_run=False):
         )
         while not dry_run:
             try:
-                gh.post(
-                    f"repos/{task.owner}/{task.repo}/statuses/{task.head}",
-                    {
-                        "context": status_context,
-                        "state": state or "pending",
-                        "target_url": target_url,
-                        "description": description
-                        if state and state != "pending"
-                        else "",
-                    },
+                commit.create_status
+                (
+                    state or "pending",
+                    target_url,
+                    description if state and state != "pending" else "",
+                    status_context,
                 )
                 break
             except requests.exceptions.HTTPError as err:
@@ -1021,31 +989,17 @@ def main():
         f"Will test with the following image names: {list(test_images.keys())}"
     )
     test_images = list(test_images.values())
+    with open(args.secrets + "/github-token") as tokenfile:
+        token = tokenfile.read().strip()
+
     if args.dry_run:
         token = ""
     else:
         with open(args.secrets + "/github-token") as tokenfile:
             token = tokenfile.read().strip()
 
-    gh = Session("https://api.github.com")
-    gh.headers.update(
-        {
-            "Accept": "application/vnd.github.v3+json",
-            "User-Agent": "linux-system-roles/test",
-        }
-    )
-
     if token:
-        gh.headers.update({"Authorization": f"token {token}"})
-
-    # Use CacheControl.
-    # Requests on keep-alive connections fail when the remote has closed a
-    # connection before we've noticed and sent another request. Thus,
-    # always retry sending requests once.
-    gh.mount(
-        "https://",
-        cachecontrol.CacheControlAdapter(max_retries=1, heuristic=DontCacheStatuses()),
-    )
+        gh = Github(token, per_page=args.max_num_statuses)
 
     printed_waiting = False
 
@@ -1063,11 +1017,11 @@ def main():
         )
 
         head = parsed_url.fragment
-        pull = gh.get(f"repos/{owner}/{repo}/pulls/{pullnr}").json()
+        pull = gh.get_repo(f"{owner}/{repo}").get_pull(int(pullnr))
 
         if not head:
-            head = pull["head"]["sha"]
-        number = pull["number"]
+            head = pull.head.sha
+        number = pull.number
 
         for image in test_images:
             task = Task(owner, repo, number, head, image)
@@ -1075,7 +1029,7 @@ def main():
 
     while not args.pull_request:
         try:
-            task = choose_task(gh, repos, test_images, config, ansible_id, args)
+            task = choose_task(gh, repos, test_images, ansible_id, args)
             if not task:
                 if not printed_waiting:
                     logging.info(">>> No tasks. Waiting.")
