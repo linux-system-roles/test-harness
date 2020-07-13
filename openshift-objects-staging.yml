@@ -100,7 +100,7 @@ items:
     spec:
       replicas: 1
       selector:
-        name: linux-system-roles-staging
+        name: linux-system-roles-centos7-staging
       triggers:
         - type: ConfigChange
         - type: ImageChange

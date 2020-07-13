@@ -132,7 +132,7 @@ items:
     spec:
       replicas: 8
       selector:
-        name: linux-system-roles
+        name: linux-system-roles-centos7
       triggers:
         - type: ConfigChange
         - type: ImageChange
