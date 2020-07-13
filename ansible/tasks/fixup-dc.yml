@@ -17,7 +17,7 @@
 
 - name: Ensure dc has node selector - add missing
   command: oc -n {{ test_harness_namespace }} patch dc/{{ __test_harness_dc }} --type json \
-    -p '[{"op":"add","path":"/spec/template/spec/nodeSelector","value":{{ test_harness_node_selector }} }]'
+    -p '[{"op":"add","path":"/spec/template/spec/nodeSelector","value":{{ test_harness_node_selector|to_json }} }]'
   when:
     - test_harness_need_node_selector|bool
     - "'nodeSelector' not in register_lsr_staging_dc.resources[0].spec.template.spec"
@@ -43,8 +43,8 @@
     -p '[{"op":"add","path":"/spec/template/spec/securityContext","value":{"runAsUser":0}}]'
   when:
     - test_harness_run_as_root|bool
-    - "'securityContext' not in register_lsr_staging_dc.resources[0].spec.template.spec"
-    - "'runAsUser' not in register_lsr_staging_dc.resources[0].spec.template.spec.securityContext"
+    - "'securityContext' not in register_lsr_staging_dc.resources[0].spec.template.spec or
+      'runAsUser' not in register_lsr_staging_dc.resources[0].spec.template.spec.securityContext"
 
 - name: Ensure secret permission set correctly - replace existing
   command: oc -n {{ test_harness_namespace }} patch dc/{{ __test_harness_dc }} --type json \
