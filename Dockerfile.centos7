@@ -2,7 +2,7 @@ FROM centos:7
 
 RUN yum update -y && PKGS="centos-release-ansible-27 centos-release-scl-rh" && \
     yum install -y $PKGS && rpm -V $PKGS && \
-    PKGS="ansible epel-release" && yum install -y $PKGS && rpm -V $PKGS && \
+    PKGS="ansible epel-release python2-jmespath" && yum install -y $PKGS && rpm -V $PKGS && \
     PKGS="rh-git218 python3-pip standard-test-roles python2-fmf seabios-bin" && \
     yum -y install $PKGS && rpm -V $PKGS && \
     yum clean all && \
