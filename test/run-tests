@@ -475,12 +475,28 @@ def pull_ok_to_test(gh, owner, repo, pull, author, head):
 def get_statuses(gh, owner, repo, sha):
     """
     Fetches all statuses of the given commit in a repository and returns a dict
-    mapping context to its most recent status.
+    mapping context to its most recent status.  Will search all pages and return
+    a single result of all statuses from all pages.
     """
+    page = 1
+    status = {"statuses": []}
+    num_statuses = 0
+    while True:
+        # https://developer.github.com/v3/repos/statuses/#get-the-combined-status-for-a-specific-ref
+        page_status = gh.get(
+            f"repos/{owner}/{repo}/commits/{sha}/status?page={page}"
+        ).json()
+        if page_status and page_status["statuses"]:
+            num_statuses = num_statuses + len(page_status["statuses"])
+            status["statuses"].extend(page_status["statuses"])
+            page = page + 1
+        else:
+            break
 
-    # https://developer.github.com/v3/repos/statuses/#get-the-combined-status-for-a-specific-ref
-    status = gh.get(f"repos/{owner}/{repo}/commits/{sha}/status").json()
-
+    logging.debug(
+        f"get_statuses: found [{num_statuses}] statuses "
+        f"for [{owner}/{repo}/commits/{sha}]"
+    )
     return {x["context"]: x for x in status["statuses"]}
 
 
