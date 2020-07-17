@@ -472,31 +472,32 @@ def pull_ok_to_test(gh, owner, repo, pull, author, head):
     logging.debug("PR is not ok to test")
 
 
-def get_statuses(gh, owner, repo, sha):
+def get_statuses(gh, owner, repo, sha, max_num_statuses):
     """
     Fetches all statuses of the given commit in a repository and returns a dict
-    mapping context to its most recent status.  Will search all pages and return
-    a single result of all statuses from all pages.
+    mapping context to its most recent status.
+    Will return at most max_num_statuses.   By default, github will return 30, but
+    some of our PRs have more than that.
     """
-    page = 1
-    status = {"statuses": []}
-    num_statuses = 0
-    while True:
-        # https://developer.github.com/v3/repos/statuses/#get-the-combined-status-for-a-specific-ref
-        page_status = gh.get(
-            f"repos/{owner}/{repo}/commits/{sha}/status?page={page}"
-        ).json()
-        if page_status and page_status["statuses"]:
-            num_statuses = num_statuses + len(page_status["statuses"])
-            status["statuses"].extend(page_status["statuses"])
-            page = page + 1
+    # https://developer.github.com/v3/repos/statuses/#get-the-combined-status-for-a-specific-ref
+    status = gh.get(
+        f"repos/{owner}/{repo}/commits/{sha}/status?per_page={max_num_statuses}"
+    ).json()
+    if status["total_count"] > len(status["statuses"]):
+        # error - there are too many statuses
+        if max_num_statuses <= len(status["statuses"]):
+            logging.error(
+                f"Total number of statuses {status['total_count']} exceeds "
+                f"max_num_statuses {max_num_statuses} statuses for "
+                f"{owner}/{repo}/commits/{sha} - please increase max_num_statuses"
+            )
         else:
-            break
-
-    logging.debug(
-        f"get_statuses: found [{num_statuses}] statuses "
-        f"for [{owner}/{repo}/commits/{sha}]"
-    )
+            # hit hard limit - will have to use paging :-(
+            logging.error(
+                f"Total number of statuses {status['total_count']} exceeds "
+                f"max_num_statuses {max_num_statuses} statuses for "
+                f"{owner}/{repo}/commits/{sha} - need to use paging"
+            )
     return {x["context"]: x for x in status["statuses"]}
 
 
@@ -542,7 +543,7 @@ def get_status_context(variant, image_name, ansible_id):
     return f"{image_name}/{ansible_id}{suffix}"
 
 
-def choose_task(gh, repos, images, config, ansible_id, variant):
+def choose_task(gh, repos, images, config, ansible_id, args):
     """
     Collect tasks from open pull requests (one task for each image
     and each open pull).
@@ -566,11 +567,13 @@ def choose_task(gh, repos, images, config, ansible_id, variant):
             if not pull_ok_to_test(gh, owner, repo, number, author, head):
                 continue
 
-            statuses = get_statuses(gh, owner, repo, head)
+            statuses = get_statuses(gh, owner, repo, head, args.max_num_statuses)
             commands = get_comment_commands(gh, owner, repo, number)
 
             for image in images:
-                status_context = get_status_context(variant, image["name"], ansible_id)
+                status_context = get_status_context(
+                    args.variant, image["name"], ansible_id
+                )
                 status = statuses.get(status_context)
 
                 if check_commit_needs_testing(status, commands):
@@ -713,7 +716,9 @@ def handle_task(gh, args, config, task, ansible_id, dry_run=False):
         if not dry_run:
             time.sleep(random.randint(5, 20))
 
-            statuses = get_statuses(gh, task.owner, task.repo, task.head)
+            statuses = get_statuses(
+                gh, task.owner, task.repo, task.head, args.max_num_statuses
+            )
             status = statuses.get(status_context)
             if status["description"] != description:
                 logging.info(
@@ -941,6 +946,12 @@ def main():
         default=os.environ.get("TEST_HARNESS_REPOSITORIES", None),
         help="Comma delimited list of repositories to override config",
     )
+    parser.add_argument(
+        "--max-num-statuses",
+        type=int,
+        default=int(os.environ.get("TEST_HARNESS_MAX_NUM_STATUSES", "60")),
+        help="Number of statuses to retrieve - default 60 - github default is 30",
+    )
 
     args = parser.parse_args()
 
@@ -1064,7 +1075,7 @@ def main():
 
     while not args.pull_request:
         try:
-            task = choose_task(gh, repos, test_images, config, ansible_id, args.variant)
+            task = choose_task(gh, repos, test_images, config, ansible_id, args)
             if not task:
                 if not printed_waiting:
                     logging.info(">>> No tasks. Waiting.")
