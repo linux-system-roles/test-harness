@@ -309,11 +309,12 @@ class Task:
     repository against an OS image.
     """
 
-    def __init__(self, owner, repo, pull, head, image):
+    def __init__(self, owner, repo, pull, head, commit, image):
         self.owner = owner
         self.repo = repo
         self.pull = pull
         self.head = head
+        self.commit = commit
         self.image = image
         self.inventory = "/usr/share/ansible/inventory/standard-inventory-qcow2"
 
@@ -472,19 +473,13 @@ def pull_ok_to_test(pyghrepo, pyghpull, author, head):
     return False
 
 
-def get_statuses(commits):
+def get_statuses(commit):
     """
     Fetches all statuses of the given commit in a repository and returns a dict
     mapping context to its most recent status.
-    Will return at most max_num_statuses.   By default, github will return 30, but
-    some of our PRs have more than that.
     """
-    statues = []
-    for commit in commits:
-        sts = commit.get_statuses().reversed
-        for st in sts:
-            statues.append(st)
-    return {x.context: x for x in statues}
+    statuses = commit.get_statuses().reversed
+    return {x.context: x for x in statuses}
 
 
 def get_comment_commands(pyghpull):
@@ -514,7 +509,7 @@ def get_status_context(variant, image_name, ansible_id):
     return f"{image_name}/{ansible_id}{suffix}"
 
 
-def choose_task(gh, repos, images, config, ansible_id, args):
+def choose_task(gh, repos, images, ansible_id, args):
     """
     Collect tasks from open pull requests (one task for each image
     and each open pull).
@@ -539,7 +534,8 @@ def choose_task(gh, repos, images, config, ansible_id, args):
             if not pull_ok_to_test(pyghrepo, pull, author, head):
                 continue
 
-            statuses = get_statuses(pull.get_commits())
+            commit = pyghrepo.get_commit(head)
+            statuses = get_statuses(commit)
             commands = get_comment_commands(pull)
 
             for image in images:
@@ -551,7 +547,7 @@ def choose_task(gh, repos, images, config, ansible_id, args):
                 else:
                     status = {}
                 if check_commit_needs_testing(status, commands):
-                    task = Task(owner, repo, number, head, image)
+                    task = Task(owner, repo, number, head, commit, image)
                     logging.debug(f"Testing PR {pull.url} with image {image['source']}")
                     return task
                 else:
@@ -579,15 +575,16 @@ def check_commit_needs_testing(status, commands):
         )
         return True
 
+    updated_at = status.updated_at.strftime("%Y%m%d-%H%M%S")
     # or a generic re-check was requested:
-    if status.updated_at.strftime("%Y%m%d-%H%M%S") < commands[COMMENT_CMD_TEST_ALL]:
+    if updated_at < commands[COMMENT_CMD_TEST_ALL]:
         logging.debug("PR will be tested because it was given comment to test all")
         return True
 
     # or the status is error or failure and a re-check was requested
     if (
         status.state in ("failure", "error")
-        and status.updated_at.strftime("%Y%m%d-%H%M%S") < commands[COMMENT_CMD_TEST_BAD]
+        and updated_at < commands[COMMENT_CMD_TEST_BAD]
     ):
         logging.debug(
             "PR will be tested because it was given comment to retest failing tests"
@@ -595,11 +592,7 @@ def check_commit_needs_testing(status, commands):
         return True
 
     # or the status is pending and a re-check was requested
-    if (
-        status.state == "pending"
-        and status.updated_at.strftime("%Y%m%d-%H%M%S")
-        < commands[COMMENT_CMD_TEST_PENDING]
-    ):
+    if status.state == "pending" and updated_at < commands[COMMENT_CMD_TEST_PENDING]:
         logging.debug(
             "PR will be tested because it was given comment to retest pending tests"
         )
@@ -689,8 +682,7 @@ def handle_task(gh, args, config, task, ansible_id, dry_run=False):
         if not dry_run:
             time.sleep(random.randint(5, 20))
 
-            pull = gh.get_repo(f"{task.owner}/{task.repo}").get_pull(task.pull)
-            statuses = get_statuses(pull.get_commits())
+            statuses = get_statuses(task.commit)
             status = statuses[status_context]
             if status.description != description:
                 logging.info(
@@ -1022,9 +1014,10 @@ def main():
         if not head:
             head = pull.head.sha
         number = pull.number
+        commit = gh.get_repo(f"{owner}/{repo}").get_commit(head)
 
         for image in test_images:
-            task = Task(owner, repo, number, head, image)
+            task = Task(owner, repo, number, head, commit, image)
             handle_task(gh, args, config, task, ansible_id, args.dry_run)
 
     while not args.pull_request:
