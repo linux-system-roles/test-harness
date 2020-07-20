@@ -17,13 +17,16 @@
   - name: Initiate build of {{ __test_harness_environ }} image
     command: oc -n {{ test_harness_namespace }} start-build --follow {{ __test_harness_bc }}
     changed_when: false
+    when: __test_harness_env_is_enabled
 
   - name: Get {{ __test_harness_environ }} dc rollout status
     command: oc -n {{ test_harness_namespace }} rollout status --watch=false dc/{{ __test_harness_dc }}
     register: register_dc_rollout
     changed_when: false
+    when: __test_harness_env_is_enabled
 
   - name: Ensure latest {{ __test_harness_environ }} dc is rolled out
     command: oc -n {{ test_harness_namespace }} rollout latest dc/{{ __test_harness_dc }}
     when: register_dc_rollout.stdout is match("^replication controller.*successfully rolled out$")
     changed_when: false
+    when: __test_harness_env_is_enabled

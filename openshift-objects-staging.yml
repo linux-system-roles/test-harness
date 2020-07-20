@@ -98,7 +98,7 @@ items:
     metadata:
       name: linux-system-roles-centos7-staging
     spec:
-      replicas: 1
+      replicas: 0
       selector:
         name: linux-system-roles-centos7-staging
       triggers:

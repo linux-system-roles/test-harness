@@ -130,7 +130,7 @@ items:
     metadata:
       name: linux-system-roles-centos7
     spec:
-      replicas: 8
+      replicas: 0
       selector:
         name: linux-system-roles-centos7
       triggers:

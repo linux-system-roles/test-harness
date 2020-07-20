@@ -62,6 +62,7 @@
       __test_harness_ci_obj_file: ../openshift-objects-staging.yml
       __test_harness_dc: linux-system-roles-staging
       __test_harness_bc: linux-system-roles-staging
+      __test_harness_env_is_enabled: true
     when: test_harness_use_staging | d(false) | bool
 
   - name: Ensure production is set up
@@ -73,6 +74,7 @@
       __test_harness_ci_obj_file: ../openshift-objects.yml
       __test_harness_dc: linux-system-roles
       __test_harness_bc: linux-system-roles
+      __test_harness_env_is_enabled: true
     when: test_harness_use_production | d(false) | bool
 
   - name: Ensure centos7 staging is set up
@@ -84,6 +86,7 @@
       __test_harness_ci_obj_file: ../openshift-objects-staging.yml
       __test_harness_dc: linux-system-roles-centos7-staging
       __test_harness_bc: linux-system-roles-centos7-staging
+      __test_harness_env_is_enabled: false
     when: test_harness_use_staging | d(false) | bool
 
   - name: Ensure centos7 production is set up
@@ -95,4 +98,5 @@
       __test_harness_ci_obj_file: ../openshift-objects.yml
       __test_harness_dc: linux-system-roles-centos7
       __test_harness_bc: linux-system-roles-centos7
+      __test_harness_env_is_enabled: false
     when: test_harness_use_production | d(false) | bool
