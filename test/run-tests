@@ -309,12 +309,13 @@ class Task:
     repository against an OS image.
     """
 
-    def __init__(self, owner, repo, pull, head, commit, image):
+    def __init__(self, owner, repo, pull, head, pyghrepo, pyghcommit, image):
         self.owner = owner
         self.repo = repo
         self.pull = pull
         self.head = head
-        self.commit = commit
+        self.pyghrepo = pyghrepo
+        self.pyghcommit = pyghcommit
         self.image = image
         self.inventory = "/usr/share/ansible/inventory/standard-inventory-qcow2"
 
@@ -492,11 +493,10 @@ def get_comment_commands(pyghpull):
     comments = pyghpull.get_issue_comments()
 
     for comment in comments:
+        updated_at = comment.updated_at.strftime("%Y%m%d-%H%M%S")
         for command in commands:
-            if command in comment.body and commands[
-                command
-            ] < comment.updated_at.strftime("%Y%m%d-%H%M%S"):
-                commands[command] = comment.updated_at.strftime("%Y%m%d-%H%M%S")
+            if command in comment.body and commands[command] < updated_at:
+                commands[command] = updated_at
 
     return commands
 
@@ -547,7 +547,7 @@ def choose_task(gh, repos, images, ansible_id, args):
                 else:
                     status = {}
                 if check_commit_needs_testing(status, commands):
-                    task = Task(owner, repo, number, head, commit, image)
+                    task = Task(owner, repo, number, head, pyghrepo, commit, image)
                     logging.debug(f"Testing PR {pull.url} with image {image['source']}")
                     return task
                 else:
@@ -673,7 +673,10 @@ def handle_task(gh, args, config, task, ansible_id, dry_run=False):
         # we wake up, we know that nobody else wants to do the same task and
         # can go ahead. Otherwise, choose something else.
 
-        commit = gh.get_repo(f"{task.owner}/{task.repo}").get_commit(task.head)
+        if task.pyghcommit:
+            commit = task.pyghcommit
+        else:
+            commit = task.pyghrepo.get_commit(task.head)
         commit.create_status(
             state="pending", context=status_context, description=description
         )
@@ -682,7 +685,7 @@ def handle_task(gh, args, config, task, ansible_id, dry_run=False):
         if not dry_run:
             time.sleep(random.randint(5, 20))
 
-            statuses = get_statuses(task.commit)
+            statuses = get_statuses(commit)
             status = statuses[status_context]
             if status.description != description:
                 logging.info(
@@ -1009,15 +1012,15 @@ def main():
         )
 
         head = parsed_url.fragment
-        pull = gh.get_repo(f"{owner}/{repo}").get_pull(int(pullnr))
+        pyghrepo = gh.get_repo(f"{owner}/{repo}")
+        pull = pyghrepo.get_pull(int(pullnr))
 
         if not head:
             head = pull.head.sha
         number = pull.number
-        commit = gh.get_repo(f"{owner}/{repo}").get_commit(head)
 
         for image in test_images:
-            task = Task(owner, repo, number, head, commit, image)
+            task = Task(owner, repo, number, head, pyghrepo, None, image)
             handle_task(gh, args, config, task, ansible_id, args.dry_run)
 
     while not args.pull_request:
