@@ -39,6 +39,10 @@ COMMENT_CMD_TEST_ALL = "[citest]"
 COMMENT_CMD_TEST_PENDING = "[citest pending]"
 COMMENT_CMD_TEST_BAD = "[citest bad]"
 
+KVM_BACKEND = "kvm"
+CITOOL_BACKEND = "citool"
+CITOOL_COMMAND = "/entrypoint.sh"
+
 
 class TransientErrorWaitTime:
     TIME_DEFAULT = 30
@@ -225,7 +229,7 @@ def run(*argv, env=None, check=True, cwd=None, return_stdout=False):
     if return_stdout:
         stdout_val = subprocess.PIPE
 
-    return subprocess.run(
+    result = subprocess.run(
         argv,
         env=runenv,
         check=check,
@@ -234,6 +238,8 @@ def run(*argv, env=None, check=True, cwd=None, return_stdout=False):
         cwd=cwd,
         encoding="utf-8",
     )
+    logging.debug(f"run: result of {argv} was {result}")
+    return result
 
 
 def fetch_image(url, cache):
@@ -321,17 +327,22 @@ class Task:
     def __str__(self):
         return f"task {self.owner}/{self.repo}/{self.pull}:{self.image['name']}"
 
-    def run(self, artifactsdir, cachedir, inventory=None):
+    def run(
+        self, artifactsdir, private_artifactsdir, cachedir, backend, inventory=None
+    ):
         """
-        Runs the task and puts results into @artifactsdir. Returns True if all
+        Runs the task and puts results into @artifactsdir. Puts non-public
+        artifacts into @private_artifactsdir.  Returns True if all
         tests succeeded.
         """
 
         if not inventory:
             inventory = self.inventory
-        image_path = fetch_image(self.image["source"], cachedir)
-        if not image_path:
-            return False
+
+        if backend == KVM_BACKEND:
+            image_path = fetch_image(self.image["source"], cachedir)
+            if not image_path:
+                return False
 
         with checkout_repository(
             self.owner, self.repo, f"pull/{self.pull}/head"
@@ -411,19 +422,54 @@ class Task:
                     # we do need to run the setup (if it exists) in the same
                     # invocation of ansible-playbook, so that that it applies
                     # to the same VM as the test playbook.
-                    result = run(
-                        "ansible-playbook",
-                        "-vv",
-                        f"--inventory={inventory}",
-                        setup_file,
-                        playbook,
-                        env={
-                            "TEST_SUBJECTS": image_path,
-                            "TEST_ARTIFACTS": artifactsdir,
-                        },
-                        check=False,
-                        cwd=os.path.dirname(playbook),
-                    )
+                    if backend == CITOOL_BACKEND:
+                        result = run(
+                            CITOOL_COMMAND,
+                            "-o",
+                            f"{private_artifactsdir}/citool-debug.log",
+                            "ansible",
+                            "rules-engine",
+                            "guest-setup",
+                            "--playbooks",
+                            setup_file,
+                            "guess-environment",
+                            "--image-method=force",
+                            "--image",
+                            self.image["openstack_image"],
+                            "--distro-method=force",
+                            "--distro",
+                            self.image["openstack_image"],
+                            "--compose-method=force",
+                            "--compose",
+                            self.image["openstack_image"],
+                            "openstack",
+                            "test-scheduler-sti",
+                            "--playbook",
+                            playbook,
+                            "test-scheduler",
+                            "test-schedule-runner-sti",
+                            "test-schedule-runner",
+                            "test-schedule-report",
+                            check=False,
+                            cwd=os.path.dirname(playbook),
+                        )
+                    elif backend == KVM_BACKEND:
+                        result = run(
+                            "ansible-playbook",
+                            "-vv",
+                            f"--inventory={inventory}",
+                            setup_file,
+                            playbook,
+                            env={
+                                "TEST_SUBJECTS": image_path,
+                                "TEST_ARTIFACTS": artifactsdir,
+                            },
+                            check=False,
+                            cwd=os.path.dirname(playbook),
+                        )
+
+                    else:
+                        assert False, "unreachable"
 
                 if result.returncode != 0:
                     with open(ansible_log, "r") as ansible_file:
@@ -433,9 +479,11 @@ class Task:
                                 return None
 
                     print("FAILURE")
+                    logging.debug(f"test failed for {artifactsdir}")
                     return False
 
                 print("SUCCESS")
+            logging.debug(f"test passed for {artifactsdir}")
             return True
 
 
@@ -733,8 +781,13 @@ def handle_task(gh, args, config, task, ansible_id, dry_run=False):
         timestamp = start_time.strftime("%Y%m%d-%H%M%S")
 
         workdir = tempfile.mkdtemp(prefix=f"linux-system-role-test-work-{task.id_}-")
+        private_workdir = tempfile.mkdtemp(
+            prefix=f"linux-system-role-test-work-private-{task.id_}-"
+        )
         artifactsdir = f"{workdir}/artifacts"
         os.makedirs(artifactsdir)
+        private_artifactsdir = f"{private_workdir}/artifacts"
+        os.makedirs(private_artifactsdir)
 
         with redirect_output(f"{artifactsdir}/test.log"):
             print(title)
@@ -743,8 +796,13 @@ def handle_task(gh, args, config, task, ansible_id, dry_run=False):
             try:
                 task.inventory = args.inventory
                 result = task.run(
-                    f"{artifactsdir}", args.cache, inventory=args.inventory
+                    artifactsdir,
+                    private_artifactsdir,
+                    args.cache,
+                    args.backend,
+                    inventory=args.inventory,
                 )
+                logging.debug(f"task result {result} for {artifactsdir}")
                 if result:
                     state = "success"
                 elif result is None:
@@ -755,6 +813,7 @@ def handle_task(gh, args, config, task, ansible_id, dry_run=False):
 
             # Do not handle these exceptions
             except (KeyboardInterrupt, SystemExit):
+                logging.debug(f"task terminated unexpectedly for {artifactsdir}")
                 raise
 
             # pylint: disable=broad-except,invalid-name
@@ -775,7 +834,10 @@ def handle_task(gh, args, config, task, ansible_id, dry_run=False):
         local_test_log = f"{artifactsdir}/test.log"
 
         if dry_run:
-            logging.info(f"Artifacts kept at: {artifactsdir}")
+            logging.info(
+                f"Artifacts kept at: {artifactsdir}; "
+                f"private artifacts at {private_artifactsdir}"
+            )
             with open(local_test_log) as test_log:
                 logging.info(test_log.read())
         else:
@@ -791,18 +853,24 @@ def handle_task(gh, args, config, task, ansible_id, dry_run=False):
                 else:
                     state = "error"
                     description += ": Error uploading results"
+            else:
+                # move files to private_artifactsdir
+                for ff in os.listdir(artifactsdir):
+                    shutil.move(f"{artifactsdir}/{ff}", f"{private_artifactsdir}/{ff}")
 
             # FIXME: workdir might be kept when python crashes
             if not args.keep_results:
                 shutil.rmtree(workdir)
+                shutil.rmtree(private_workdir)
 
     finally:
         duration = (datetime.datetime.utcnow() - start_time).seconds
         logging.info(
-            "Finished in %d seconds %s: %s",
+            "Finished in %d seconds %s: %s - %s",
             duration,
             task,
             state if state and state != "pending" else "abandoned",
+            description,
         )
         while not dry_run:
             try:
@@ -829,14 +897,25 @@ def handle_task(gh, args, config, task, ansible_id, dry_run=False):
         sys.exit(1)
 
 
-def check_environment():
+def check_environment(args):
     """
     Check whether the environment is sane.
     Intent here is to fail early for example if /dev/kvm is not available.
     """
-    if not os.access("/dev/kvm", os.R_OK | os.W_OK):
-        logging.critical("test-harness needs access to /dev/kvm, aborting")
-        sys.exit(1)
+    if args.backend == KVM_BACKEND:
+        if not os.access("/dev/kvm", os.R_OK | os.W_OK):
+            logging.critical("test-harness needs access to /dev/kvm, aborting")
+            sys.exit(1)
+
+    elif args.backend == CITOOL_BACKEND:
+        try:
+            run(CITOOL_COMMAND, "--help")
+        except Exception:
+            logging.critical(
+                f"test-harness needs installed citool command {CITOOL_COMMAND}, "
+                "aborting"
+            )
+            sys.exit(1)
 
 
 def setup_logging(config_logging):
@@ -851,6 +930,7 @@ def setup_logging(config_logging):
         if k in {"format", "style", "datefmt", "level"}
     )
 
+    initial_log_message = ""
     try:
         # Add stderr handler
         stream_handler = logging.StreamHandler()
@@ -861,11 +941,22 @@ def setup_logging(config_logging):
             # as config may be shared between multiple hosts with shared storage,
             # we may need hostname in log name
             filename = config_logging["filename"].replace("HOSTNAME", HOSTNAME)
-            file_handler = logging.FileHandler(filename)
-            file_handler.setLevel(config_logging.get("file_level", logging.NOTSET))
-            handlers.append(file_handler)
+            try:
+                file_handler = logging.FileHandler(filename)
+                file_handler.setLevel(config_logging.get("file_level", logging.NOTSET))
+                handlers.append(file_handler)
+            except PermissionError:
+                # running as non-root user, but trying to write to /var/log, usually -
+                # log the error, skip logging to file
+                initial_log_message = (
+                    f"could not open {filename} as uid "
+                    f"{os.geteuid()}: PermissionError: "
+                    "will not log to file"
+                )
 
         logging.basicConfig(handlers=handlers, **log_cfg)
+        if initial_log_message:
+            logging.warning(initial_log_message)
     except ValueError:
         logging.basicConfig(**log_cfg_default)
         logging.warning("Invalid logging config, using default", exc_info=True)
@@ -952,6 +1043,12 @@ def main():
         default=int(os.environ.get("TEST_HARNESS_MAX_NUM_STATUSES", "60")),
         help="Number of statuses to retrieve - default 60 - github default is 30",
     )
+    parser.add_argument(
+        "--backend",
+        default=os.environ.get("TEST_HARNESS_BACKEND", KVM_BACKEND),
+        choices=[KVM_BACKEND, CITOOL_BACKEND],
+        help="Backend for testing",
+    )
 
     args = parser.parse_args()
 
@@ -978,7 +1075,7 @@ def main():
         repos = [r.split("/") for r in args.repositories.split(",")]
     setup_logging(config.get("logging", {}))
 
-    check_environment()
+    check_environment(args)
 
     ansible_version = LooseVersion(get_ansible_version())
     logging.info("Using Ansible version {}".format(ansible_version))
