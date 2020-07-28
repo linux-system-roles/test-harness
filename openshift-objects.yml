@@ -8,102 +8,103 @@ items:
   - kind: ImageStream
     apiVersion: v1
     metadata:
-      name: linux-system-roles
+      name: {{ __test_harness_imgstream_name | d("linux-system-roles") }}
     spec:
       tags:
         - name: latest
           from:
             kind: DockerImage
-            name: linux-system-roles:latest
+            name: {{ __test_harness_imgstream_name | d("linux-system-roles") }}:latest
         - name: staging
           from:
             kind: DockerImage
-            name: linux-system-roles:staging
-  - kind: ImageStream
-    apiVersion: v1
-    metadata:
-      name: linux-system-roles-centos7
-    spec:
-      tags:
-        - name: latest
-          from:
-            kind: DockerImage
-            name: linux-system-roles-centos7:latest
-        - name: staging
-          from:
-            kind: DockerImage
-            name: linux-system-roles-centos7:staging
+            name: {{ __test_harness_imgstream_name | d("linux-system-roles") }}:staging
   - kind: BuildConfig
     apiVersion: v1
     metadata:
-      name: linux-system-roles
+      name: {{ __test_harness_bc | d("linux-system-roles") }}
     spec:
       output:
         to:
           kind: ImageStreamTag
-          name: linux-system-roles:latest
+          name: {{ __test_harness_imgstream_name | d("linux-system-roles") }}:latest
       resources: {}
       source:
         git:
           uri: https://github.com/linux-system-roles/test-harness
-          ref: production
+          ref: {{ test_harness_git_branch | d("production") }}
         type: Git
+{% if __test_harness_build_config_files %}
+        configMaps:
+          - configMap:
+              name: {{ __test_harness_bc | d("linux-system-roles") }}-buildcm
+{% endif %}
+        dockerfile: |
+          {{
+            lookup('file', __test_harness_dockerfile) |
+            regex_replace('^FROM .*\n', 'FROM ' ~ __test_harness_dockerfile_from) |
+            replace('#EXTRAPRETESTER', __test_harness_dockerfile_pre_tester | join('\n')) |
+            replace('#EXTRAPOST', __test_harness_dockerfile_post | join('\n')) |
+            indent(width=10,blank=True)
+          }}
       strategy:
-        type: Docker
-      triggers:
-      - type: ConfigChange
-      - type: ImageChange
-  - kind: BuildConfig
-    apiVersion: v1
-    metadata:
-      name: linux-system-roles-centos7
-    spec:
-      output:
-        to:
-          kind: ImageStreamTag
-          name: linux-system-roles-centos7:latest
-      resources: {}
-      source:
-        git:
-          uri: https://github.com/linux-system-roles/test-harness
-          ref: production
-        type: Git
-      strategy:
-        dockerStrategy:
-          dockerfilePath: Dockerfile.centos7
+        dockerStrategy: {}
       triggers:
       - type: ConfigChange
       - type: ImageChange
   - kind: DeploymentConfig
     apiVersion: v1
     metadata:
-      name: linux-system-roles
+      name: {{ __test_harness_dc | d("linux-system-roles") }}
     spec:
-      replicas: 8
+      replicas: {{ __test_harness_deploy_replicas | d("8") | int }}
       selector:
-        name: linux-system-roles
+        name: {{ __test_harness_dc | d("linux-system-roles") }}
       triggers:
         - type: ConfigChange
         - type: ImageChange
           imageChangeParams:
             automatic: true
             containerNames:
-              - linux-system-roles
+              - {{ __test_harness_dc | d("linux-system-roles") }}
             from:
               kind: ImageStreamTag
-              name: linux-system-roles:latest
+              name: {{ __test_harness_imgstream_name | d("linux-system-roles") }}:{{
+                "latest" if test_harness_git_branch | d("production") == "production"
+                else "staging"
+              }}
       strategy:
         type: Rolling
       template:
         metadata:
           labels:
-            name: linux-system-roles
+            name: {{ __test_harness_dc | d("linux-system-roles") }}
         spec:
           serviceAccountName: tester
           restartPolicy: Always
+{% if test_harness_need_node_selector | d(false) %}
+          nodeSelector: {{ test_harness_node_selector | to_json }}
+{% endif %}
+          securityContext:
+{% if __test_harness_run_as_root | d(false) %}
+            runAsUser: 0
+{% else %}
+            runAsUser: 1000
+            fsGroup: 1000
+{% endif %}
           containers:
-            - name: linux-system-roles
-              image: linux-system-roles:latest
+            - name: {{ __test_harness_dc | d("linux-system-roles") }}
+              image: {{ __test_harness_imgstream_name | d("linux-system-roles") }}:{{
+                "latest" if test_harness_git_branch | d("production") == "production"
+                else "staging"
+              }}
+{% if __test_harness_deploy_env %}
+              env:
+{%   for key,value in __test_harness_deploy_env.items() %}
+                - name: {{ key }}
+                  value: "{{ value }}"
+{%   endfor %}
+{% endif %}
               volumeMounts:
                 - name: secrets
                   mountPath: /secrets
@@ -113,66 +114,22 @@ items:
                   readOnly: true
                 - name: cache
                   mountPath: /cache
+{% if __test_harness_run_as_root | d(false) %}
               securityContext:
                 privileged: true
-                fsGroup: 1000
+{% endif %}
           volumes:
             - name: secrets
               secret:
-                secretName: secrets
+                secretName: {{ __test_harness_secret_name }}
+{% if __test_harness_run_as_root | d(false) %}
+                defaultMode: 256
+{% else %}
+                defaultMode: 288
+{% endif %}
             - name: config
               configMap:
-                name: config
-            - name: cache
-              emptyDir:
-  - kind: DeploymentConfig
-    apiVersion: v1
-    metadata:
-      name: linux-system-roles-centos7
-    spec:
-      replicas: 8
-      selector:
-        name: linux-system-roles-centos7
-      triggers:
-        - type: ConfigChange
-        - type: ImageChange
-          imageChangeParams:
-            automatic: true
-            containerNames:
-              - linux-system-roles-centos7
-            from:
-              kind: ImageStreamTag
-              name: linux-system-roles-centos7:latest
-      strategy:
-        type: Rolling
-      template:
-        metadata:
-          labels:
-            name: linux-system-roles-centos7
-        spec:
-          serviceAccountName: tester
-          restartPolicy: Always
-          containers:
-            - name: linux-system-roles-centos7
-              image: linux-system-roles-centos7:latest
-              volumeMounts:
-                - name: secrets
-                  mountPath: /secrets
-                  readOnly: true
-                - name: config
-                  mountPath: /config
-                  readOnly: true
-                - name: cache
-                  mountPath: /cache
-              securityContext:
-                privileged: true
-                fsGroup: 1000
-          volumes:
-            - name: secrets
-              secret:
-                secretName: secrets
-            - name: config
-              configMap:
-                name: config
+                name: {{ __test_harness_cm_name }}
+                defaultMode: 420
             - name: cache
               emptyDir:
