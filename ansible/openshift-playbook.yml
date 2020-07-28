@@ -11,6 +11,12 @@
     test_harness_run_as_root: true
     test_harness_node_selector:
       system-roles-ci: "true"
+    test_harness_dockerfile_from: "docker.io/library/fedora:32"
+    test_harness_build_config_files: []
+    test_harness_dockerfile_pre_tester: []
+    test_harness_dockerfile_post: []
+    test_harness_deploy_env: {}
+    test_harness_openshift_template: ../openshift-objects.yml
   tasks:
     - name: Block for tasks that only run when not using test_harness_dry_run
       when: not test_harness_dry_run
@@ -20,40 +26,6 @@
 
         - name: Pre-flight checks
           include_tasks: tasks/pre-flight-checks-general.yml
-
-        # hmm - may need admin access for this
-        - name: Ensure testing namespace is present
-          k8s:
-            name: "{{ test_harness_namespace }}"
-            api_version: v1
-            kind: Namespace
-            state: present
-          ignore_errors: true
-
-        - name: Check if testing namespace is present
-          k8s_info:
-            name: "{{ test_harness_namespace }}"
-            api_version: v1
-            kind: Namespace
-          register: register_namespace_present
-          changed_when: false
-
-        - fail:
-            msg: The namespace "{{ test_harness_namespace }}" does not exist
-          when: not register_namespace_present.resources | d([])
-
-        - k8s_info:
-            api_version: security.openshift.io/v1
-            kind: SecurityContextConstraints
-            name: "{{ test_harness_scc }}"
-            namespace: "{{ test_harness_namespace }}"
-          register: register_scc
-          changed_when: false
-
-        - name: Ensure tester sa is in test scc
-          command: oc -n {{ test_harness_namespace }} patch scc/{{ test_harness_scc }} --type json \
-            -p '[{"op":"add","path":"/users/-","value":"{{ test_harness_sa }}"}]'
-          when: test_harness_sa not in register_scc.resources[0].users
 
     - name: Ensure production secrets are present
       include_tasks: tasks/create-secrets.yml
@@ -73,42 +45,103 @@
       include_tasks: tasks/setup-ci-environ.yml
       vars:
         __test_harness_environ: staging
+        __test_harness_imgstream_name: linux-system-roles
         __test_harness_cm_name: config-staging
         __test_harness_cm_file: config-staging.json
-        __test_harness_ci_obj_file: ../openshift-objects-staging.yml
         __test_harness_dc: linux-system-roles-staging
         __test_harness_bc: linux-system-roles-staging
+        __test_harness_secret_name: secrets-staging
+        __test_harness_ghtoken_file: github-token-staging
+        __test_harness_deploy_replicas: "{{ test_harness_deploy_replicas_staging | d(1) }}"
+        __test_harness_dockerfile: ../Dockerfile
+        __test_harness_dockerfile_from: "{{ test_harness_dockerfile_from }}"
+        __test_harness_dockerfile_pre_tester: "{{ test_harness_dockerfile_pre_tester }}"
+        __test_harness_build_config_files: "{{ test_harness_build_config_files }}"
+        __test_harness_dockerfile_post: "{{ test_harness_dockerfile_post }}"
+        __test_harness_deploy_env: "{{ test_harness_deploy_env }}"
+        __test_harness_run_as_root: "{{ test_harness_run_as_root }}"
       when: test_harness_use_staging | d(false) | bool
 
     - name: Ensure production is set up
       include_tasks: tasks/setup-ci-environ.yml
       vars:
         __test_harness_environ: production
+        __test_harness_imgstream_name: linux-system-roles
         __test_harness_cm_name: config
         __test_harness_cm_file: config.json
-        __test_harness_ci_obj_file: ../openshift-objects.yml
         __test_harness_dc: linux-system-roles
         __test_harness_bc: linux-system-roles
+        __test_harness_secret_name: secrets
+        __test_harness_ghtoken_file: github-token
+        __test_harness_deploy_replicas: "{{ test_harness_deploy_replicas | d(8) }}"
+        __test_harness_dockerfile: ../Dockerfile
+        __test_harness_dockerfile_from: "{{ test_harness_dockerfile_from }}"
+        __test_harness_dockerfile_pre_tester: "{{ test_harness_dockerfile_pre_tester }}"
+        __test_harness_build_config_files: "{{ test_harness_build_config_files }}"
+        __test_harness_dockerfile_post: "{{ test_harness_dockerfile_post }}"
+        __test_harness_deploy_env: "{{ test_harness_deploy_env }}"
+        __test_harness_run_as_root: "{{ test_harness_run_as_root }}"
       when: test_harness_use_production | d(false) | bool
+
+    - name: Ensure citool staging is set up
+      include_tasks: tasks/setup-ci-environ.yml
+      vars:
+        __test_harness_environ: staging
+        __test_harness_imgstream_name: linux-system-roles-citool
+        __test_harness_cm_name: config-staging
+        __test_harness_cm_file: config-staging.json
+        __test_harness_dc: linux-system-roles-citool-staging
+        __test_harness_bc: linux-system-roles-citool-staging
+        __test_harness_secret_name: secrets-staging
+        __test_harness_ghtoken_file: github-token-staging
+        __test_harness_deploy_replicas: 1
+        __test_harness_dockerfile: ../Dockerfile
+        __test_harness_dockerfile_from: "{{ test_harness_dockerfile_from_citool | d(false) }}"
+        __test_harness_dockerfile_pre_tester: "{{ test_harness_dockerfile_pre_tester_citool | d([]) }}"
+        __test_harness_build_config_files: "{{ test_harness_build_config_files_citool | d([]) }}"
+        __test_harness_dockerfile_post: "{{ test_harness_dockerfile_post_citool | d([]) }}"
+        __test_harness_deploy_env: "{{ test_harness_deploy_env_citool | d({}) }}"
+        __test_harness_run_as_root: false
+      when: test_harness_use_staging | d(false) | bool
 
     - name: Ensure centos7 staging is set up
       include_tasks: tasks/setup-ci-environ.yml
       vars:
         __test_harness_environ: staging
+        __test_harness_imgstream_name: linux-system-roles-centos7
         __test_harness_cm_name: config-staging
         __test_harness_cm_file: config-staging.json
-        __test_harness_ci_obj_file: ../openshift-objects-staging.yml
         __test_harness_dc: linux-system-roles-centos7-staging
         __test_harness_bc: linux-system-roles-centos7-staging
+        __test_harness_secret_name: secrets-staging
+        __test_harness_ghtoken_file: github-token-staging
+        __test_harness_deploy_replicas: 1
+        __test_harness_dockerfile: ../Dockerfile.centos7
+        __test_harness_dockerfile_from: "centos:7"
+        __test_harness_dockerfile_pre_tester: "{{ test_harness_dockerfile_pre_tester }}"
+        __test_harness_build_config_files: "{{ test_harness_build_config_files }}"
+        __test_harness_dockerfile_post: "{{ test_harness_dockerfile_post }}"
+        __test_harness_deploy_env: "{{ test_harness_deploy_env }}"
+        __test_harness_run_as_root: "{{ test_harness_run_as_root }}"
       when: test_harness_use_staging | d(false) | bool
 
     - name: Ensure centos7 production is set up
       include_tasks: tasks/setup-ci-environ.yml
       vars:
         __test_harness_environ: production
+        __test_harness_imgstream_name: linux-system-roles-centos7
         __test_harness_cm_name: config
         __test_harness_cm_file: config.json
-        __test_harness_ci_obj_file: ../openshift-objects.yml
         __test_harness_dc: linux-system-roles-centos7
         __test_harness_bc: linux-system-roles-centos7
+        __test_harness_secret_name: secrets
+        __test_harness_ghtoken_file: github-token
+        __test_harness_deploy_replicas: 1
+        __test_harness_dockerfile: ../Dockerfile.centos7
+        __test_harness_dockerfile_from: "centos:7"
+        __test_harness_dockerfile_pre_tester: "{{ test_harness_dockerfile_pre_tester }}"
+        __test_harness_build_config_files: "{{ test_harness_build_config_files }}"
+        __test_harness_dockerfile_post: "{{ test_harness_dockerfile_post }}"
+        __test_harness_deploy_env: "{{ test_harness_deploy_env }}"
+        __test_harness_run_as_root: "{{ test_harness_run_as_root }}"
       when: test_harness_use_production | d(false) | bool

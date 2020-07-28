@@ -5,17 +5,43 @@
     --output=yaml > {{ __test_harness_cm_name }}.yml
   changed_when: false
 
-- name: Ensure configmap is present
-  k8s:
-    src: "{{ __test_harness_cm_name }}.yml"
-    namespace: "{{ test_harness_namespace }}"
-    state: present
-    apply: true
-  when: not test_harness_dry_run
-
-- name: Remove config file
-  file:
-    state: absent
-    path: "{{ __test_harness_cm_name }}.yml"
+- name: Generate build config file
+  shell: |
+    oc -n {{ test_harness_namespace }} create configmap {{ __test_harness_bc }}-buildcm \
+    {% for file in __test_harness_build_config_files %}
+    --from-file={{ file | basename }}={{ test_harness_config_dir }}/{{ file }} \
+    {% endfor %}
+    --dry-run=true --output=yaml > {{ __test_harness_bc }}-buildcm.yml
   changed_when: false
+  when: __test_harness_build_config_files | d(false)
+
+- name: Tasks for configmap when not dry run
   when: not test_harness_dry_run
+  block:
+    - name: Ensure configmap is present
+      k8s:
+        src: "{{ __test_harness_cm_name }}.yml"
+        namespace: "{{ test_harness_namespace }}"
+        state: present
+        apply: true
+
+    - name: Ensure build configmap is present
+      k8s:
+        src: "{{ __test_harness_bc }}-buildcm.yml"
+        namespace: "{{ test_harness_namespace }}"
+        state: present
+        apply: true
+      when: __test_harness_build_config_files | d(false)
+
+    - name: Remove config file
+      file:
+        state: absent
+        path: "{{ __test_harness_cm_name }}.yml"
+      changed_when: false
+
+    - name: Remove build config file
+      file:
+        state: absent
+        path: "{{ __test_harness_bc }}-buildcm.yml"
+      changed_when: false
+      when: __test_harness_build_config_files | d(false)

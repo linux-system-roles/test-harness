@@ -9,3 +9,37 @@
 
   - name: See if logged into an OpenShift cluster
     command: oc whoami
+
+  # hmm - may need admin access for this
+  - name: Ensure testing namespace is present
+    k8s:
+      name: "{{ test_harness_namespace }}"
+      api_version: v1
+      kind: Namespace
+      state: present
+    ignore_errors: true
+
+  - name: Check if testing namespace is present
+    k8s_info:
+      name: "{{ test_harness_namespace }}"
+      api_version: v1
+      kind: Namespace
+    register: register_namespace_present
+    changed_when: false
+
+  - fail:
+      msg: The namespace "{{ test_harness_namespace }}" does not exist
+    when: not register_namespace_present.resources | d([])
+
+  - k8s_info:
+      api_version: security.openshift.io/v1
+      kind: SecurityContextConstraints
+      name: "{{ test_harness_scc }}"
+      namespace: "{{ test_harness_namespace }}"
+    register: register_scc
+    changed_when: false
+
+  - name: Ensure tester sa is in test scc
+    command: oc -n {{ test_harness_namespace }} patch scc/{{ test_harness_scc }} --type json \
+      -p '[{"op":"add","path":"/users/-","value":"{{ test_harness_sa }}"}]'
+    when: test_harness_sa not in register_scc.resources[0].users
