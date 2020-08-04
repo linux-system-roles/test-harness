@@ -50,8 +50,19 @@
       -p '[{"op":"add","path":"/users/-","value":"{{ test_harness_sa }}"}]'
     when: test_harness_sa not in register_scc.resources[0].users
 
-  - name: Ensure secrets are present
+  - name: Ensure production secrets are present
     include_tasks: tasks/create-secrets.yml
+    vars:
+      __test_harness_secret_name: secrets
+      __test_harness_ghtoken_file: github-token
+    when: test_harness_use_production | d(false) | bool
+
+  - name: Ensure staging secrets are present
+    include_tasks: tasks/create-secrets.yml
+    vars:
+      __test_harness_secret_name: secrets-staging
+      __test_harness_ghtoken_file: github-token-staging
+    when: test_harness_use_staging | d(false) | bool
 
   - name: Ensure staging is set up
     include_tasks: tasks/setup-ci-environ.yml
