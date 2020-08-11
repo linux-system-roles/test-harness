@@ -2,6 +2,8 @@
 - name: Configure OpenShift deployment for linux-system-roles CI testing
   hosts: localhost
   vars:
+    test_harness_secrets_dir: "{{ '$HOME/rhel-system-roles/test-harness-config/secrets' | expandvars }}"
+    test_harness_config_dir: "{{ '$HOME/rhel-system-roles/test-harness-config/config' | expandvars }}"
     test_harness_namespace: lsr-test-harness
     test_harness_sa: "system:serviceaccount:{{ test_harness_namespace }}:tester"
     test_harness_need_node_selector: true

@@ -13,14 +13,6 @@
       msg: You have unstaged changes in your local git branch [{{ test_harness_git_branch }}].  Please commit before deploying.
     when: test_harness_register_git_status.stdout != ""
 
-  - set_fact:
-      test_harness_secrets_dir: "{{ '$HOME/rhel-system-roles/test-harness-config/secrets' | expandvars }}"
-    when: test_harness_secrets_dir is not defined
-
-  - set_fact:
-      test_harness_config_dir: "{{ '$HOME/rhel-system-roles/test-harness-config/config' | expandvars }}"
-    when: test_harness_config_dir is not defined
-
   - fail:
       msg: You may need to set or correct "test_harness_secrets_dir" in your inventory - [{{ test_harness_secrets_dir }}] not found
     when: not test_harness_secrets_dir is directory
