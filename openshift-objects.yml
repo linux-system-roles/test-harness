@@ -27,7 +27,10 @@ items:
       output:
         to:
           kind: ImageStreamTag
-          name: {{ __test_harness_imgstream_name | d("linux-system-roles") }}:latest
+          name: {{ __test_harness_imgstream_name | d("linux-system-roles") }}:{{
+            "latest" if test_harness_git_branch | d("production") == "production"
+            else "staging"
+          }}
       resources: {}
       source:
         git:
