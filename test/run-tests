@@ -1040,8 +1040,8 @@ def main():
     parser.add_argument(
         "--max-num-statuses",
         type=int,
-        default=int(os.environ.get("TEST_HARNESS_MAX_NUM_STATUSES", "60")),
-        help="Number of statuses to retrieve - default 60 - github default is 30",
+        default=int(os.environ.get("TEST_HARNESS_MAX_NUM_STATUSES", "99")),
+        help="Number of statuses to retrieve - default 99 - github default is 30",
     )
     parser.add_argument(
         "--backend",
