@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import random
+import re
 import signal
 import shlex
 import shutil
@@ -413,9 +414,13 @@ class Task:
                 return None
 
             ansible_log = f"{artifactsdir}/ansible.log"
+            if backend == CITOOL_BACKEND:
+                output_log = f"{private_artifactsdir}/citool.log"
+            else:
+                output_log = ansible_log
             for playbook in sorted(playbooks):
                 print(f"Testing {playbook}...", end="")
-                with redirect_output(ansible_log, mode="a"):
+                with redirect_output(output_log, mode="a"):
                     # Use the qcow2 inventory from standard-test-roles, which
                     # boots a transient VM and runs the playbook against that.
                     # Create a fresh instance for each test playbook. However,
@@ -470,6 +475,39 @@ class Task:
 
                     else:
                         assert False, "unreachable"
+
+                if backend == CITOOL_BACKEND:
+                    ptrn = re.compile(
+                        f"{playbook}] Ansible logs are in (.+/ansible-output.txt)"
+                    )
+                    # parse the ansible output file location from citool-debug.log
+                    ansible_output = ""
+                    with open(f"{private_artifactsdir}/citool-debug.log") as citooldbg:
+                        for line in citooldbg:
+                            mtch = ptrn.search(line)
+                            if mtch:
+                                ansible_output = mtch.group(1)
+                                break
+                    # ansible_output is relative to /WORKDIR
+                    if ansible_output:
+                        # filter out garbage in ansible_output
+                        with open(f"/WORKDIR/{ansible_output}") as inf:
+                            with open(ansible_log, "w") as outf:
+                                docopy = False
+                                for line in inf:
+                                    if line.startswith("---v---v---v---v---v---"):
+                                        docopy = True
+                                    elif line.startswith("---^---^---^---^---^---"):
+                                        break
+                                    elif docopy:
+                                        outf.write(line)
+                    else:
+                        logging.error(
+                            "ERROR: Could not find location of ansible output "
+                            "in citool-debug.log"
+                        )
+                        print("FAILURE")
+                        return False
 
                 if result.returncode != 0:
                     with open(ansible_log, "r") as ansible_file:
@@ -909,7 +947,8 @@ def check_environment(args):
 
     elif args.backend == CITOOL_BACKEND:
         try:
-            run(CITOOL_COMMAND, "--help")
+            run(CITOOL_COMMAND, "-V", "-o", "/tmp/citool-debug.log")
+            run("ansible", "--version")
         except Exception:
             logging.critical(
                 f"test-harness needs installed citool command {CITOOL_COMMAND}, "
