@@ -343,7 +343,7 @@ class Task:
         if backend == KVM_BACKEND:
             image_path = fetch_image(self.image["source"], cachedir)
             if not image_path:
-                return False
+                return None
 
         with checkout_repository(
             self.owner, self.repo, f"pull/{self.pull}/head"
