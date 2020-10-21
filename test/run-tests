@@ -33,6 +33,7 @@ import yaml
 # use LooseVersion to handle alphas, betas, other pre-release versions
 from distutils.version import LooseVersion
 from distutils.util import strtobool
+from compose2image import composeurl2images
 
 HOSTNAME = socket.gethostname()
 
@@ -328,6 +329,30 @@ class Task:
     def __str__(self):
         return f"task {self.owner}/{self.repo}/{self.pull}:{self.image['name']}"
 
+    def get_url(self):
+        source = self.image.get("source")
+        if source:
+            return source
+        compose_url = self.image.get("compose")
+        if compose_url:
+            variant = self.image.get("variant")
+            image_urls = composeurl2images(compose_url, "x86_64", variant)
+            if len(image_urls) == 1:
+                return image_urls[0]
+            else:
+                if image_urls:
+                    logging.error(
+                        f"ERROR: Multiple images found: {image_urls}"
+                        "in compose {compose_url}"
+                    )
+                else:
+                    logging.error(f"ERROR: no image found in compose {compose_url}")
+        else:
+            logging.error(
+                "ERROR: neither source nor compose specified"
+                f"in image {self.image['name']}"
+            )
+
     def run(
         self, artifactsdir, private_artifactsdir, cachedir, backend, inventory=None
     ):
@@ -341,7 +366,10 @@ class Task:
             inventory = self.inventory
 
         if backend == KVM_BACKEND:
-            image_path = fetch_image(self.image["source"], cachedir)
+            image_url = self.get_url()
+            if not image_url:
+                return None
+            image_path = fetch_image(image_url, cachedir)
             if not image_path:
                 return None
 
@@ -665,12 +693,12 @@ def choose_task(gh, repos, images, config, ansible_id, args):
                 if check_commit_needs_testing(status, commands):
                     task = Task(owner, repo, number, head, image)
                     logging.debug(
-                        f"Testing PR {pull['url']} with image {image['source']}"
+                        f"Testing PR {pull['url']} with image {image['name']}"
                     )
                     return task
                 else:
                     logging.debug(
-                        f"Not testing PR {pull['url']} with image {image['source']}"
+                        f"Not testing PR {pull['url']} with image {image['name']}"
                     )
             else:
                 logging.debug("No images to use for testing PR {}".format(pull["url"]))
@@ -1140,7 +1168,7 @@ def main():
         pattern_matched = False
         for pattern in image_patterns:
             if fnmatch.fnmatch(image["name"], pattern) or fnmatch.fnmatch(
-                image["source"], pattern
+                image.get("source", ""), pattern
             ):
                 pattern_matched = True
                 break
