@@ -6,7 +6,7 @@ RUN yum update -y && PKGS="centos-release-ansible-28 centos-release-scl-rh" && \
     PKGS="rh-git218 python3-pip standard-test-roles python2-fmf seabios-bin" && \
     yum -y install $PKGS && rpm -V $PKGS && \
     yum clean all && \
-    pip3 install cachecontrol
+    pip3 install cachecontrol productmd
 
 RUN curl -L -o /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.2/dumb-init_1.2.2_x86_64
 RUN chmod +x /usr/local/bin/dumb-init
