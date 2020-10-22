@@ -33,6 +33,7 @@ import yaml
 # use LooseVersion to handle alphas, betas, other pre-release versions
 from distutils.version import LooseVersion
 from distutils.util import strtobool
+from checkmeta import role_supported
 from compose2image import composeurl2images
 
 HOSTNAME = socket.gethostname()
@@ -352,6 +353,43 @@ class Task:
                 "ERROR: neither source nor compose specified"
                 f"in image {self.image['name']}"
             )
+
+    def is_role_distro_supported(self):
+        """
+        Return True if image is supported. Otherwise False.
+        """
+        distro, version = self.image["name"].split("-")
+        if version == "x":
+            image_filename = os.path.basename(
+                urllib.parse.urlparse(self.get_url()).path
+            )
+            # We expect the first number in the URL image filename to be the major
+            # version
+            version = re.search(r"\d+", image_filename).group()
+
+        try:
+            with checkout_repository(
+                self.owner, self.repo, f"pull/{self.pull}/head"
+            ) as repo_tmp_dir:
+                is_supported = role_supported(
+                    f"{ repo_tmp_dir }/meta/main.yml", distro, version
+                )
+                if is_supported:
+                    logging.debug(
+                        f"The role { self.repo } supports platform "
+                        f"{ self.image['name'] }."
+                    )
+                else:
+                    logging.debug(
+                        f"The role { self.repo } does not support platform "
+                        f"{ self.image['name'] }. Skipping."
+                    )
+                return is_supported
+        except Exception:
+            logging.warning(
+                "WARNING: Cannot open metafile meta/main.yml. Skipping all images."
+            )
+            return None
 
     def run(
         self, artifactsdir, private_artifactsdir, cachedir, backend, inventory=None
@@ -842,6 +880,20 @@ def handle_task(gh, args, config, task, ansible_id, dry_run=False):
                 # avoid overwriting status from another instance
                 dry_run = True
                 return
+
+        role_supported_state = task.is_role_distro_supported()
+        if role_supported_state is False:
+            state = "success"
+            description = (
+                f"The role does not support this platform. Skipping. {description}"
+            )
+            return
+        elif role_supported_state is None:
+            state = "failure"
+            description = (
+                f"The role does not contain meta/main.yml file! Skipping. {description}"
+            )
+            return
 
         logging.info("Starting %s", task)
         timestamp = start_time.strftime("%Y%m%d-%H%M%S")
