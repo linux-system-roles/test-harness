@@ -392,7 +392,13 @@ class Task:
             return None
 
     def run(
-        self, artifactsdir, private_artifactsdir, cachedir, backend, inventory=None
+        self,
+        artifactsdir,
+        private_artifactsdir,
+        cachedir,
+        backend,
+        inventory=None,
+        test_collections=False,
     ):
         """
         Runs the task and puts results into @artifactsdir. Puts non-public
@@ -414,6 +420,30 @@ class Task:
         with checkout_repository(
             self.owner, self.repo, f"pull/{self.pull}/head"
         ) as sourcedir:
+            # If test_collections is true, it retrieves lsr_role2collection.py
+            # and converts the role to the collections format.
+            if test_collections:
+                r2c_url = "https://raw.githubusercontent.com/linux-system-roles/auto-maintenance/master/lsr_role2collection.py"  # noqa:E501
+                r2c = requests.get(r2c_url, allow_redirects=True)
+                open("lsr_role2collection.py", "wb").write(r2c.content)
+                from lsr_role2collection import role2collection
+
+                os.environ["COLLECTION_SRC_PATH"] = sourcedir
+                os.environ["COLLECTION_SRC_OWNER"] = "linux-system-roles"
+                collection_dest_path = tempfile.TemporaryDirectory().name
+                os.environ["COLLECTION_DEST_PATH"] = collection_dest_path
+                os.environ["COLLECTION_ROLE"] = self.repo
+                # The tests dir is copied to the temporary dir
+                # which is outside of the collections.
+                os.environ[
+                    "COLLECTION_TESTS_DEST_PATH"
+                ] = tempfile.TemporaryDirectory().name
+                role2collection()
+                collection_paths = (
+                    collection_dest_path
+                    + ":~/.ansible/collections:/usr/share/ansible/collections"
+                )
+
             # Generate a playbook with a single raw task to setup the image
             # (this usually means installing python2 on the guest for ansible)
             setup_file = os.path.join(sourcedir, "_setup.yml")
@@ -467,7 +497,15 @@ class Task:
             # used to be tested by running all playbooks `test/test_*.yml`.
             # Support both, but prefer the standard way. Can be removed once
             # all repos are moved over.
-            playbookglob = f"{sourcedir}/tests/tests*.yml"
+            if test_collections:
+                playbookglob = (
+                    os.environ["COLLECTION_TESTS_DEST_PATH"]
+                    + "/tests/"
+                    + self.repo
+                    + "/tests*.yml"
+                )
+            else:
+                playbookglob = f"{sourcedir}/tests/tests*.yml"
             playbooks = glob.glob(playbookglob)
             if not playbooks:
                 playbooks = glob.glob(f"{sourcedir}/test/test_*.yml")
@@ -494,6 +532,11 @@ class Task:
                     # invocation of ansible-playbook, so that that it applies
                     # to the same VM as the test playbook.
                     if backend == CITOOL_BACKEND:
+                        testenv = {}
+                        if test_collections:
+                            testenv = {
+                                "ANSIBLE_COLLECTIONS_PATHS": collection_paths,
+                            }
                         result = run(
                             CITOOL_COMMAND,
                             "-o",
@@ -521,20 +564,24 @@ class Task:
                             "test-schedule-runner-sti",
                             "test-schedule-runner",
                             "test-schedule-report",
+                            env=testenv,
                             check=False,
                             cwd=os.path.dirname(playbook),
                         )
                     elif backend == KVM_BACKEND:
+                        testenv = {
+                            "TEST_SUBJECTS": image_path,
+                            "TEST_ARTIFACTS": artifactsdir,
+                        }
+                        if test_collections:
+                            testenv["ANSIBLE_COLLECTIONS_PATHS"] = collection_paths
                         result = run(
                             "ansible-playbook",
                             "-vv",
                             f"--inventory={inventory}",
                             setup_file,
                             playbook,
-                            env={
-                                "TEST_SUBJECTS": image_path,
-                                "TEST_ARTIFACTS": artifactsdir,
-                            },
+                            env=testenv,
                             check=False,
                             cwd=os.path.dirname(playbook),
                         )
@@ -919,6 +966,7 @@ def handle_task(gh, args, config, task, ansible_id, dry_run=False):
                     args.cache,
                     args.backend,
                     inventory=args.inventory,
+                    test_collections=config.get("test_collections", False),
                 )
                 logging.debug(f"task result {result} for {artifactsdir}")
                 if result:
