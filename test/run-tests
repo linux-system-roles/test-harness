@@ -9,6 +9,7 @@ import html
 import json
 import logging
 import os
+import errno
 import random
 import re
 import signal
@@ -45,6 +46,9 @@ COMMENT_CMD_TEST_BAD = "[citest bad]"
 KVM_BACKEND = "kvm"
 CITOOL_BACKEND = "citool"
 CITOOL_COMMAND = "/entrypoint.sh"
+
+# https://www.freedesktop.org/wiki/CommonExtendedAttributes/
+URL_XATTR = "user.xdg.origin.url"
 
 
 class TransientErrorWaitTime:
@@ -245,19 +249,40 @@ def run(*argv, env=None, check=True, cwd=None, return_stdout=False):
     return result
 
 
-def fetch_image(url, cache):
+def origurl(path):
     """
-    Fetches an image from @url into @cache, if a file with the same name
-    doesn't yet exist. There is no need for fancier caching, as image names are
-    unique enough.
+    Returns the original URL that a given file was downloaded from.
+    """
+
+    try:
+        urlbytes = os.getxattr(path, URL_XATTR)
+    except OSError as e:
+        if e.errno == errno.ENODATA:
+            return None
+        raise
+    return os.fsdecode(urlbytes)
+
+
+def fetch_image(url, cache, label):
+    """
+    Fetches an image from @url into @cache as @label if a file with the
+    same name downloaded from the same URL doesn't yet exist. There is
+    no need for fancier caching, as image URLs are unique enough.
+
+    Labels are not unique enough, because the URL corresponding to
+    the label may get updated. And using a filename derived from URL
+    would lead to leftover image files filling up the cache directory,
+    as nobody would delete them when the URL changes.
 
     Returns the full path to the image.
     """
 
-    image_name = os.path.basename(urllib.parse.urlparse(url).path)
+    original_name = os.path.basename(urllib.parse.urlparse(url).path)
+    nameroot, suffix = os.path.splitext(original_name)
+    image_name = label + suffix
     path = os.path.join(cache, image_name)
 
-    if not os.path.exists(path):
+    if not os.path.exists(path) or url != origurl(path):
         print(f"Fetch {url}")
 
         image_tempfile = tempfile.NamedTemporaryFile(dir=cache, delete=False)
@@ -270,6 +295,7 @@ def fetch_image(url, cache):
             os.unlink(image_tempfile.name)
             return None
 
+        os.setxattr(image_tempfile.name, URL_XATTR, os.fsencode(url))
         os.rename(image_tempfile.name, path)
     else:
         print(f"Use cached {image_name}")
@@ -413,7 +439,7 @@ class Task:
             image_url = self.get_url()
             if not image_url:
                 return None
-            image_path = fetch_image(image_url, cachedir)
+            image_path = fetch_image(image_url, cachedir, self.image["name"])
             if not image_path:
                 return None
 
