@@ -10,6 +10,7 @@ RUN dnf update -y && dnf install -y \
     python3-requests \
     python3-CacheControl \
     python3-productmd \
+    python3-ruamel-yaml \
     standard-test-roles && dnf clean all
 
 RUN useradd -m tester
