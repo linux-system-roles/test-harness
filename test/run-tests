@@ -451,7 +451,11 @@ class Task:
             if test_collections:
                 r2c_url = "https://raw.githubusercontent.com/linux-system-roles/auto-maintenance/master/lsr_role2collection.py"  # noqa:E501
                 r2c = requests.get(r2c_url, allow_redirects=True)
-                open("lsr_role2collection.py", "wb").write(r2c.content)
+                role2collection_path = (
+                    f"{ os.path.dirname(os.path.realpath(__file__)) }"
+                    "/lsr_role2collection.py"
+                )
+                open(role2collection_path, "wb").write(r2c.content)
                 from lsr_role2collection import role2collection
 
                 os.environ["COLLECTION_SRC_PATH"] = sourcedir
