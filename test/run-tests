@@ -446,31 +446,17 @@ class Task:
         with checkout_repository(
             self.owner, self.repo, f"pull/{self.pull}/head"
         ) as sourcedir:
-            # If test_collections is true, it retrieves lsr_role2collection.py
-            # and converts the role to the collections format.
+            # If test_collections is true, converts the role to the collections format.
             if test_collections:
-                r2c_url = "https://raw.githubusercontent.com/linux-system-roles/auto-maintenance/master/lsr_role2collection.py"  # noqa:E501
-                r2c = requests.get(r2c_url, allow_redirects=True)
-                role2collection_path = (
-                    f"{ os.path.dirname(os.path.realpath(__file__)) }"
-                    "/lsr_role2collection.py"
-                )
-                open(role2collection_path, "wb").write(r2c.content)
-                from lsr_role2collection import role2collection
-
                 os.environ["COLLECTION_SRC_PATH"] = sourcedir
-                os.environ["COLLECTION_SRC_OWNER"] = "linux-system-roles"
-                collection_dest_path = tempfile.TemporaryDirectory().name
-                os.environ["COLLECTION_DEST_PATH"] = collection_dest_path
                 os.environ["COLLECTION_ROLE"] = self.repo
-                # The tests dir is copied to the temporary dir
-                # which is outside of the collections.
-                os.environ[
-                    "COLLECTION_TESTS_DEST_PATH"
-                ] = tempfile.TemporaryDirectory().name
-                role2collection()
+                logging.debug(f"PYTHONPATH - {sys.path}")
+                from importlib import import_module
+
+                _lsr = import_module("lsr_role2collection")
+                _lsr.role2collection()
                 collection_paths = (
-                    collection_dest_path
+                    os.environ["COLLECTION_DEST_PATH"]
                     + ":~/.ansible/collections:/usr/share/ansible/collections"
                 )
 
@@ -906,7 +892,17 @@ def make_html(source_file):
     return html_file
 
 
-def handle_task(gh, args, config, task, ansible_id, dry_run=False):
+def cleanup_collection_tempdirs():
+    shutil.rmtree(os.environ["COLLECTION_TESTS_DEST_PATH"])
+    shutil.rmtree(os.environ["COLLECTION_DEST_PATH"])
+    for pp in sys.path:
+        if str.startswith(pp, "/tmp/tmp"):
+            shutil.rmtree(pp)
+
+
+def handle_task(
+    gh, args, config, task, ansible_id, dry_run=False, test_collections=False
+):
     """ Process a task """
     title = f"{HOSTNAME}: {task.owner}/{task.repo}: pull #{task.pull} "
     title += f'({task.head[:7]}) on {task.image["name"]}'
@@ -996,7 +992,7 @@ def handle_task(gh, args, config, task, ansible_id, dry_run=False):
                     args.cache,
                     args.backend,
                     inventory=args.inventory,
-                    test_collections=config.get("test_collections", False),
+                    test_collections=test_collections,
                 )
                 logging.debug(f"task result {result} for {artifactsdir}")
                 if result:
@@ -1085,6 +1081,8 @@ def handle_task(gh, args, config, task, ansible_id, dry_run=False):
             except requests.exceptions.HTTPError as err:
                 if not handle_transient_httperrors(err):
                     raise
+    if test_collections:
+        cleanup_collection_tempdirs()
 
     print()
 
@@ -1246,6 +1244,12 @@ def main():
         choices=[KVM_BACKEND, CITOOL_BACKEND],
         help="Backend for testing",
     )
+    parser.add_argument(
+        "--collections",
+        default=bool(strtobool(os.environ.get("TEST_HARNESS_COLLECTIONS", "False"))),
+        action="store_true",
+        help="Convert roles to the collections format then run the CI tests",
+    )
 
     args = parser.parse_args()
 
@@ -1278,6 +1282,25 @@ def main():
     logging.info("Using Ansible version {}".format(ansible_version))
     # this is used in PR status - context name
     ansible_id = f"ansible-{ansible_version.version[0]}.{ansible_version.version[1]}"
+
+    # If test_collections is true, download lsr_role2collection.py
+    test_collections = args.collections
+    if test_collections:
+        r2c_url = "https://raw.githubusercontent.com/linux-system-roles/auto-maintenance/master/lsr_role2collection.py"  # noqa:E501
+        r2c = requests.get(r2c_url, allow_redirects=True)
+        r2c_path = tempfile.mkdtemp()
+        role2collection_path = r2c_path + "/lsr_role2collection.py"
+        open(role2collection_path, "wb").write(r2c.content)
+        logging.debug(f"Write lsr_role2collection to {role2collection_path}")
+        sys.path.append(r2c_path)
+
+        os.environ["COLLECTION_SRC_OWNER"] = "linux-system-roles"
+        collection_dest_path = tempfile.TemporaryDirectory().name
+        os.environ["COLLECTION_DEST_PATH"] = collection_dest_path
+        # The tests dir is copied to the temporary dir
+        # which is outside of the collections.
+        os.environ["COLLECTION_TESTS_DEST_PATH"] = tempfile.TemporaryDirectory().name
+        logging.debug(f"Appended {r2c_path} to PYTHONPATH")
 
     image_patterns = args.use_images.split(",")
     # copy all images to test_images . . .
@@ -1365,7 +1388,9 @@ def main():
 
         for image in test_images:
             task = Task(owner, repo, number, head, image)
-            handle_task(gh, args, config, task, ansible_id, args.dry_run)
+            handle_task(
+                gh, args, config, task, ansible_id, args.dry_run, test_collections
+            )
 
     while not args.pull_request:
         try:
@@ -1379,7 +1404,9 @@ def main():
                 time.sleep(600)
                 continue
 
-            handle_task(gh, args, config, task, ansible_id, args.dry_run)
+            handle_task(
+                gh, args, config, task, ansible_id, args.dry_run, test_collections
+            )
         except requests.exceptions.HTTPError as err:
             if not handle_transient_httperrors(err):
                 raise
