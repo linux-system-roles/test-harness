@@ -120,7 +120,7 @@
         __test_harness_dockerfile_pre_tester: "{{ test_harness_dockerfile_pre_tester }}"
         __test_harness_build_config_files: "{{ test_harness_build_config_files }}"
         __test_harness_dockerfile_post: "{{ test_harness_dockerfile_post }}"
-        __test_harness_deploy_env: "{{ test_harness_deploy_env | combine(test_harness_deploy_env_staging) }}"
+        __test_harness_deploy_env: "{{ test_harness_deploy_env | combine(test_harness_deploy_env_staging) | combine(test_harness_deploy_env_centos7) }}"
         __test_harness_run_as_root: "{{ test_harness_run_as_root }}"
       when: test_harness_use_staging | d(false) | bool
 
@@ -141,6 +141,6 @@
         __test_harness_dockerfile_pre_tester: "{{ test_harness_dockerfile_pre_tester }}"
         __test_harness_build_config_files: "{{ test_harness_build_config_files }}"
         __test_harness_dockerfile_post: "{{ test_harness_dockerfile_post }}"
-        __test_harness_deploy_env: "{{ test_harness_deploy_env }}"
+        __test_harness_deploy_env: "{{ test_harness_deploy_env | combine(test_harness_deploy_env_centos7) }}"
         __test_harness_run_as_root: "{{ test_harness_run_as_root }}"
       when: test_harness_use_production | d(false) | bool
