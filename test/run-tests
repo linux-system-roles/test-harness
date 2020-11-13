@@ -1318,6 +1318,15 @@ def main():
                 )
                 del test_images[image["name"]]
             continue
+
+        if image["name"] == "rhel-x" and args.backend == CITOOL_BACKEND:
+            logging.debug(
+                "Image rhel-x will not be used for testing because it is not supported "
+                "in Citool backend."
+            )
+            del test_images[image["name"]]
+            continue
+
         pattern_matched = False
         for pattern in image_patterns:
             if fnmatch.fnmatch(image["name"], pattern) or fnmatch.fnmatch(
