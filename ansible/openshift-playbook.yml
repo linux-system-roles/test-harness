@@ -12,6 +12,7 @@
     test_harness_node_selector:
       system-roles-ci: "true"
     test_harness_dockerfile_from: "registry.fedoraproject.org/fedora:32"
+    test_harness_dockerfile_from_centos7: "registry.centos.org/centos/centos:7"
     test_harness_build_config_files: []
     test_harness_dockerfile_pre_tester: []
     test_harness_dockerfile_post: []
@@ -116,7 +117,7 @@
         __test_harness_ghtoken_file: github-token-staging
         __test_harness_deploy_replicas: "{{ test_harness_deploy_replicas_staging | d(1) }}"
         __test_harness_dockerfile: ../Dockerfile.centos7
-        __test_harness_dockerfile_from: "centos:7"
+        __test_harness_dockerfile_from: "{{ test_harness_dockerfile_from_centos7 }}"
         __test_harness_dockerfile_pre_tester: "{{ test_harness_dockerfile_pre_tester }}"
         __test_harness_build_config_files: "{{ test_harness_build_config_files }}"
         __test_harness_dockerfile_post: "{{ test_harness_dockerfile_post }}"
@@ -137,7 +138,7 @@
         __test_harness_ghtoken_file: github-token
         __test_harness_deploy_replicas: "{{ test_harness_deploy_replicas | d(1) }}"
         __test_harness_dockerfile: ../Dockerfile.centos7
-        __test_harness_dockerfile_from: "centos:7"
+        __test_harness_dockerfile_from: "{{ test_harness_dockerfile_from_centos7 }}"
         __test_harness_dockerfile_pre_tester: "{{ test_harness_dockerfile_pre_tester }}"
         __test_harness_build_config_files: "{{ test_harness_build_config_files }}"
         __test_harness_dockerfile_post: "{{ test_harness_dockerfile_post }}"

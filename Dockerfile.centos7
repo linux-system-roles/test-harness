@@ -1,4 +1,4 @@
-FROM centos:7
+FROM registry.centos.org/centos/centos:7
 
 RUN yum update -y && PKGS="centos-release-ansible-28 centos-release-scl-rh" && \
     yum install -y $PKGS && rpm -V $PKGS && \
