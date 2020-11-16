@@ -1319,10 +1319,10 @@ def main():
                 del test_images[image["name"]]
             continue
 
-        if image["name"] == "rhel-x" and args.backend == CITOOL_BACKEND:
+        if not image.get("openstack_image") and args.backend == CITOOL_BACKEND:
             logging.debug(
-                "Image rhel-x will not be used for testing because it is not supported "
-                "in Citool backend."
+                f"Image {image['name']} will not be used for testing because it is not "
+                "supported in Citool backend."
             )
             del test_images[image["name"]]
             continue
