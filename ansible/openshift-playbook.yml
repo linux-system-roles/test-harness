@@ -11,7 +11,7 @@
     test_harness_run_as_root: true
     test_harness_node_selector:
       system-roles-ci: "true"
-    test_harness_dockerfile_from: "docker.io/library/fedora:32"
+    test_harness_dockerfile_from: "registry.fedoraproject.org/fedora:32"
     test_harness_build_config_files: []
     test_harness_dockerfile_pre_tester: []
     test_harness_dockerfile_post: []

@@ -1,4 +1,4 @@
-FROM docker.io/library/fedora:32
+FROM registry.fedoraproject.org/fedora:32
 
 USER 0
 
