@@ -11,7 +11,12 @@ RUN dnf update -y && dnf install -y \
     python3-CacheControl \
     python3-productmd \
     python3-ruamel-yaml \
-    standard-test-roles && dnf clean all
+    standard-test-roles \
+    libnftnl nftables firewalld firewalld-filesystem \
+    python3-nftables ipset python3-firewall \
+    ipset-libs iptables \
+    NetworkManager python3-gobject-base wpa_supplicant && \
+    dnf clean all
 
 RUN useradd -m tester
 #EXTRAPRETESTER
