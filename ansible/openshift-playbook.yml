@@ -102,7 +102,9 @@
         __test_harness_dockerfile_post: "{{ test_harness_dockerfile_post_citool | d([]) }}"
         __test_harness_deploy_env: "{{ test_harness_deploy_env | combine(test_harness_deploy_env_citool) | d({}) }}"
         __test_harness_run_as_root: false
-      when: test_harness_use_staging | d(false) | bool
+      when:
+        - false # disable for now
+        - test_harness_use_staging | d(false) | bool
 
     - name: Ensure centos7 staging is set up
       include_tasks: tasks/setup-ci-environ.yml
