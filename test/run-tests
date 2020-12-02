@@ -1081,8 +1081,6 @@ def handle_task(
             except requests.exceptions.HTTPError as err:
                 if not handle_transient_httperrors(err):
                     raise
-    if test_collections:
-        cleanup_collection_tempdirs()
 
     print()
 
@@ -1423,6 +1421,9 @@ def main():
         # At this point, we have (probably) printed other messages, so
         # reset printed_waiting
         printed_waiting = False
+
+    if test_collections:
+        cleanup_collection_tempdirs()
 
 
 if __name__ == "__main__":
