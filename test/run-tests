@@ -893,10 +893,12 @@ def make_html(source_file):
 
 
 def cleanup_collection_tempdirs():
-    shutil.rmtree(os.environ["COLLECTION_TESTS_DEST_PATH"])
-    shutil.rmtree(os.environ["COLLECTION_DEST_PATH"])
+    if os.path.isdir(os.environ["COLLECTION_TESTS_DEST_PATH"]):
+        shutil.rmtree(os.environ["COLLECTION_TESTS_DEST_PATH"])
+    if os.path.isdir(os.environ["COLLECTION_DEST_PATH"]):
+        shutil.rmtree(os.environ["COLLECTION_DEST_PATH"])
     for pp in sys.path:
-        if str.startswith(pp, "/tmp/tmp"):
+        if os.path.isdir(pp) and str.startswith(pp, "/tmp/tmp"):
             shutil.rmtree(pp)
 
 
