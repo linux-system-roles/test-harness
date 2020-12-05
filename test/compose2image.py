@@ -40,7 +40,9 @@ def composeurl2images(
             if len(subvariantmatch) > 0:
                 candidates = subvariantmatch
 
-    return [(composepath + qcow2[0].path) for qcow2 in candidates]
+    image_urls = [(composepath + qcow2[0].path) for qcow2 in candidates]
+    return sorted(image_urls, reverse=True)
+
 
 
 if __name__ == "__main__":
@@ -60,4 +62,5 @@ if __name__ == "__main__":
     if len(imageurls) == 1:
         print(imageurls[0])
     else:
+        # The first URL is the latest image
         sys.exit("multiple images found: {}".format(imageurls))

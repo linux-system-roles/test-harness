@@ -364,16 +364,10 @@ class Task:
         if compose_url:
             variant = self.image.get("variant")
             image_urls = composeurl2images(compose_url, "x86_64", variant)
-            if len(image_urls) == 1:
+            if image_urls:
                 return image_urls[0]
             else:
-                if image_urls:
-                    logging.error(
-                        f"ERROR: Multiple images found: {image_urls}"
-                        "in compose {compose_url}"
-                    )
-                else:
-                    logging.error(f"ERROR: no image found in compose {compose_url}")
+                logging.error(f"ERROR: no image found in compose {compose_url}")
         else:
             logging.error(
                 "ERROR: neither source nor compose specified"
