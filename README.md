@@ -1,6 +1,6 @@
 # Integration Tests for Linux System Roles
 
-[![Build Status](![tox](https://github.com/linux-system-roles/test-harness/workflows/tox/badge.svg)]
+![CI Status](https://github.com/linux-system-roles/test-harness/workflows/tox/badge.svg)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/ambv/black)
 
 ## Commands
