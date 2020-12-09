@@ -513,16 +513,9 @@ class Task:
             # used to be tested by running all playbooks `test/test_*.yml`.
             # Support both, but prefer the standard way. Can be removed once
             # all repos are moved over.
-            if test_collections:
-                playbookglob = (
-                    os.environ["COLLECTION_TESTS_DEST_PATH"]
-                    + "/tests/"
-                    + self.repo
-                    + "/tests*.yml"
-                )
-            else:
-                playbookglob = f"{sourcedir}/tests/tests*.yml"
+            playbookglob = f"{sourcedir}/tests/tests*.yml"
             playbooks = glob.glob(playbookglob)
+
             if not playbooks:
                 playbooks = glob.glob(f"{sourcedir}/test/test_*.yml")
 
@@ -533,123 +526,139 @@ class Task:
                 )
                 return None
 
+            _playbook_set = [{"is_collection": False, "playbooks": playbooks}]
+
+            if test_collections:
+                playbookglob = (
+                    os.environ["COLLECTION_TESTS_DEST_PATH"]
+                    + "/tests/"
+                    + self.repo
+                    + "/tests*.yml"
+                )
+                _playbook_set.append(
+                    {"is_collection": True, "playbooks": glob.glob(playbookglob)}
+                )
+
             ansible_log = f"{artifactsdir}/ansible.log"
             if backend == CITOOL_BACKEND:
                 output_log = f"{private_artifactsdir}/citool.log"
             else:
                 output_log = ansible_log
-            for playbook in sorted(playbooks):
-                print(f"Testing {playbook}...", end="")
-                with redirect_output(output_log, mode="a"):
-                    # Use the qcow2 inventory from standard-test-roles, which
-                    # boots a transient VM and runs the playbook against that.
-                    # Create a fresh instance for each test playbook. However,
-                    # we do need to run the setup (if it exists) in the same
-                    # invocation of ansible-playbook, so that that it applies
-                    # to the same VM as the test playbook.
-                    if backend == CITOOL_BACKEND:
-                        testenv = {}
-                        if test_collections:
+            for pset in _playbook_set:
+                for playbook in sorted(pset["playbooks"]):
+                    print(f"Testing {playbook}...", end="")
+                    with redirect_output(output_log, mode="a"):
+                        # Use the qcow2 inventory from standard-test-roles, which
+                        # boots a transient VM and runs the playbook against that.
+                        # Create a fresh instance for each test playbook. However,
+                        # we do need to run the setup (if it exists) in the same
+                        # invocation of ansible-playbook, so that that it applies
+                        # to the same VM as the test playbook.
+                        if backend == CITOOL_BACKEND:
+                            testenv = {}
+                            if test_collections and pset["is_collection"]:
+                                testenv = {
+                                    "ANSIBLE_COLLECTIONS_PATHS": collection_paths,
+                                }
+                            result = run(
+                                CITOOL_COMMAND,
+                                "-o",
+                                f"{private_artifactsdir}/citool-debug.log",
+                                "ansible",
+                                "rules-engine",
+                                "guest-setup",
+                                "--playbooks",
+                                setup_file,
+                                "guess-environment",
+                                "--image-method=force",
+                                "--image",
+                                self.image["openstack_image"],
+                                "--distro-method=force",
+                                "--distro",
+                                self.image["openstack_image"],
+                                "--compose-method=force",
+                                "--compose",
+                                self.image["openstack_image"],
+                                "openstack",
+                                "test-scheduler-sti",
+                                "--playbook",
+                                playbook,
+                                "test-scheduler",
+                                "test-schedule-runner-sti",
+                                "test-schedule-runner",
+                                "test-schedule-report",
+                                env=testenv,
+                                check=False,
+                                cwd=os.path.dirname(playbook),
+                            )
+                        elif backend == KVM_BACKEND:
                             testenv = {
-                                "ANSIBLE_COLLECTIONS_PATHS": collection_paths,
+                                "TEST_SUBJECTS": image_path,
+                                "TEST_ARTIFACTS": artifactsdir,
                             }
-                        result = run(
-                            CITOOL_COMMAND,
-                            "-o",
-                            f"{private_artifactsdir}/citool-debug.log",
-                            "ansible",
-                            "rules-engine",
-                            "guest-setup",
-                            "--playbooks",
-                            setup_file,
-                            "guess-environment",
-                            "--image-method=force",
-                            "--image",
-                            self.image["openstack_image"],
-                            "--distro-method=force",
-                            "--distro",
-                            self.image["openstack_image"],
-                            "--compose-method=force",
-                            "--compose",
-                            self.image["openstack_image"],
-                            "openstack",
-                            "test-scheduler-sti",
-                            "--playbook",
-                            playbook,
-                            "test-scheduler",
-                            "test-schedule-runner-sti",
-                            "test-schedule-runner",
-                            "test-schedule-report",
-                            env=testenv,
-                            check=False,
-                            cwd=os.path.dirname(playbook),
-                        )
-                    elif backend == KVM_BACKEND:
-                        testenv = {
-                            "TEST_SUBJECTS": image_path,
-                            "TEST_ARTIFACTS": artifactsdir,
-                        }
-                        if test_collections:
-                            testenv["ANSIBLE_COLLECTIONS_PATHS"] = collection_paths
-                        result = run(
-                            "ansible-playbook",
-                            "-vv",
-                            f"--inventory={inventory}",
-                            setup_file,
-                            playbook,
-                            env=testenv,
-                            check=False,
-                            cwd=os.path.dirname(playbook),
-                        )
+                            if test_collections and pset["is_collection"]:
+                                testenv["ANSIBLE_COLLECTIONS_PATHS"] = collection_paths
+                            result = run(
+                                "ansible-playbook",
+                                "-vv",
+                                f"--inventory={inventory}",
+                                setup_file,
+                                playbook,
+                                env=testenv,
+                                check=False,
+                                cwd=os.path.dirname(playbook),
+                            )
 
-                    else:
-                        assert False, "unreachable"
+                        else:
+                            assert False, "unreachable"
 
-                if backend == CITOOL_BACKEND:
-                    ptrn = re.compile(
-                        f"{playbook}] Ansible logs are in (.+/ansible-output.txt)"
-                    )
-                    # parse the ansible output file location from citool-debug.log
-                    ansible_output = ""
-                    with open(f"{private_artifactsdir}/citool-debug.log") as citooldbg:
-                        for line in citooldbg:
-                            mtch = ptrn.search(line)
-                            if mtch:
-                                ansible_output = mtch.group(1)
-                                break
-                    # ansible_output is relative to /WORKDIR
-                    if ansible_output:
-                        # filter out garbage in ansible_output
-                        with open(f"/WORKDIR/{ansible_output}") as inf:
-                            with open(ansible_log, "w") as outf:
-                                docopy = False
-                                for line in inf:
-                                    if line.startswith("---v---v---v---v---v---"):
-                                        docopy = True
-                                    elif line.startswith("---^---^---^---^---^---"):
-                                        break
-                                    elif docopy:
-                                        outf.write(line)
-                    else:
-                        logging.error(
-                            "ERROR: Could not find location of ansible output "
-                            "in citool-debug.log"
+                    if backend == CITOOL_BACKEND:
+                        ptrn = re.compile(
+                            f"{playbook}] Ansible logs are in (.+/ansible-output.txt)"
                         )
+                        # parse the ansible output file location from citool-debug.log
+                        ansible_output = ""
+                        with open(
+                            f"{private_artifactsdir}/citool-debug.log"
+                        ) as citooldbg:
+                            for line in citooldbg:
+                                mtch = ptrn.search(line)
+                                if mtch:
+                                    ansible_output = mtch.group(1)
+                                    break
+                        # ansible_output is relative to /WORKDIR
+                        if ansible_output:
+                            # filter out garbage in ansible_output
+                            with open(f"/WORKDIR/{ansible_output}") as inf:
+                                with open(ansible_log, "w") as outf:
+                                    docopy = False
+                                    for line in inf:
+                                        if line.startswith("---v---v---v---v---v---"):
+                                            docopy = True
+                                        elif line.startswith("---^---^---^---^---^---"):
+                                            break
+                                        elif docopy:
+                                            outf.write(line)
+                        else:
+                            logging.error(
+                                "ERROR: Could not find location of ansible output "
+                                "in citool-debug.log"
+                            )
+                            print("FAILURE")
+                            return False
+
+                    if result.returncode != 0:
+                        with open(ansible_log, "r") as ansible_file:
+                            for line in ansible_file:
+                                if inventory_fail_msg in line:
+                                    print("ERROR: Inventory not properly set up")
+                                    return None
+
                         print("FAILURE")
+                        logging.debug(f"test failed for {artifactsdir}")
                         return False
 
-                if result.returncode != 0:
-                    with open(ansible_log, "r") as ansible_file:
-                        for line in ansible_file:
-                            if inventory_fail_msg in line:
-                                print("ERROR: Inventory not properly set up")
-                                return None
-
-                    print("FAILURE")
-                    logging.debug(f"test failed for {artifactsdir}")
-                    return False
-
-                print("SUCCESS")
+                    print("SUCCESS")
             logging.debug(f"test passed for {artifactsdir}")
             return True
 
@@ -1248,7 +1257,7 @@ def main():
         "--collections",
         default=bool(strtobool(os.environ.get("TEST_HARNESS_COLLECTIONS", "False"))),
         action="store_true",
-        help="Convert roles to the collections format then run the CI tests",
+        help="Run CI tests in the roles and collections formats",
     )
 
     args = parser.parse_args()
@@ -1398,7 +1407,13 @@ def main():
         for image in test_images:
             task = Task(owner, repo, number, head, image)
             handle_task(
-                gh, args, config, task, ansible_id, args.dry_run, test_collections
+                gh,
+                args,
+                config,
+                task,
+                ansible_id,
+                dry_run=args.dry_run,
+                test_collections=test_collections,
             )
 
     while not args.pull_request:
@@ -1414,7 +1429,13 @@ def main():
                 continue
 
             handle_task(
-                gh, args, config, task, ansible_id, args.dry_run, test_collections
+                gh,
+                args,
+                config,
+                task,
+                ansible_id,
+                dry_run=args.dry_run,
+                test_collections=test_collections,
             )
         except requests.exceptions.HTTPError as err:
             if not handle_transient_httperrors(err):
@@ -1424,7 +1445,7 @@ def main():
         # reset printed_waiting
         printed_waiting = False
 
-    if test_collections:
+    if test_collections and not args.keep_results:
         cleanup_collection_tempdirs()
 
 
