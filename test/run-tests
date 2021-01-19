@@ -49,6 +49,7 @@ CITOOL_COMMAND = "/entrypoint.sh"
 
 # https://www.freedesktop.org/wiki/CommonExtendedAttributes/
 URL_XATTR = "user.xdg.origin.url"
+DATE_XATTR = "user.dublincore.date"
 
 
 class TransientErrorWaitTime:
@@ -249,18 +250,30 @@ def run(*argv, env=None, check=True, cwd=None, return_stdout=False):
     return result
 
 
-def origurl(path):
-    """
-    Returns the original URL that a given file was downloaded from.
-    """
-
+def get_metadata_from_file(path, attr_key):
     try:
-        urlbytes = os.getxattr(path, URL_XATTR)
+        mdbytes = os.getxattr(path, attr_key)
     except OSError as e:
         if e.errno == errno.ENODATA:
             return None
         raise
-    return os.fsdecode(urlbytes)
+    return os.fsdecode(mdbytes)
+
+
+def image_source_last_modified_by_file_metadata(path):
+    return get_metadata_from_file(path, DATE_XATTR) if os.path.exists(path) else ""
+
+
+def origurl(path):
+    """
+    Returns the original URL that a given file was downloaded from.
+    """
+    return get_metadata_from_file(path, URL_XATTR)
+
+
+def get_metadata_from_url(url, metadata_key):
+    with urllib.request.urlopen(url) as url_response:
+        return dict(url_response.getheaders())[metadata_key]
 
 
 def fetch_image(url, cache, label):
@@ -281,8 +294,14 @@ def fetch_image(url, cache, label):
     nameroot, suffix = os.path.splitext(original_name)
     image_name = label + suffix
     path = os.path.join(cache, image_name)
+    image_last_modified_by_src = get_metadata_from_url(url, "Last-Modified")
+    image_last_modified_by_file = image_source_last_modified_by_file_metadata(path)
 
-    if not os.path.exists(path) or url != origurl(path):
+    if (
+        not os.path.exists(path)
+        or url != origurl(path)
+        or image_last_modified_by_src != image_last_modified_by_file
+    ):
         print(f"Fetch {url}")
 
         image_tempfile = tempfile.NamedTemporaryFile(dir=cache, delete=False)
@@ -296,6 +315,9 @@ def fetch_image(url, cache, label):
             return None
 
         os.setxattr(image_tempfile.name, URL_XATTR, os.fsencode(url))
+        os.setxattr(
+            image_tempfile.name, DATE_XATTR, os.fsencode(image_last_modified_by_src)
+        )
         os.rename(image_tempfile.name, path)
     else:
         print(f"Use cached {image_name}")
