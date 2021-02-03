@@ -314,7 +314,6 @@ class checkout_repository:  # pylint: disable=invalid-name
         self.repo = repo
         self.url = f"https://github.com/{owner}/{repo}"
         self.refspec = refspec
-        self.dir = None
 
     def __enter__(self):
         self.parent_dir = tempfile.TemporaryDirectory()
@@ -347,7 +346,7 @@ class checkout_repository:  # pylint: disable=invalid-name
         return {"tmp_dir": self.dir, "parent_dir": self.parent_dir.name}
 
     def __exit__(self, *exception):
-        self.dir.cleanup()
+        self.parent_dir.cleanup()
 
 
 class Task:
