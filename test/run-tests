@@ -273,7 +273,7 @@ def origurl(path):
 
 def get_metadata_from_url(url, metadata_key):
     with urllib.request.urlopen(url) as url_response:
-        return dict(url_response.getheaders())[metadata_key]
+        return url_response.getheader(metadata_key)
 
 
 def fetch_image(url, cache, label):
