@@ -418,7 +418,7 @@ class Task:
         """
         Return True if image is supported. Otherwise False.
         """
-        distro, version = self.image["name"].split("-")
+        distro, version = self.image["name"].split("-")[:2]
         if version == "x":
             image_filename = os.path.basename(
                 urllib.parse.urlparse(self.get_url()).path
