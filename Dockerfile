@@ -7,6 +7,7 @@ RUN dnf update -y && dnf install -y \
     dumb-init \
     git \
     rsync \
+    python3-netaddr \
     python3-requests \
     python3-CacheControl \
     python3-productmd \
