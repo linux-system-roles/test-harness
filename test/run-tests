@@ -332,22 +332,18 @@ class checkout_repository:  # pylint: disable=invalid-name
     """
 
     def __init__(self, owner, repo, refspec):
-        self.owner = owner
-        self.repo = repo
         self.url = f"https://github.com/{owner}/{repo}"
         self.refspec = refspec
         self.dir = None
 
     def __enter__(self):
-        self.parent_dir = tempfile.TemporaryDirectory()
-        # This way we can do ANSIBLE_ROLES_PATH={parent_dir}
-        self.dir = f"{self.parent_dir.name}/{self.owner}.{self.repo}"
+        self.dir = tempfile.TemporaryDirectory()
 
-        run("git", "init", "--quiet", self.dir)
+        run("git", "init", "--quiet", self.dir.name)
         run(
             "git",
             "-C",
-            self.dir,
+            self.dir.name,
             "fetch",
             "--quiet",
             "--depth=1",
@@ -355,18 +351,9 @@ class checkout_repository:  # pylint: disable=invalid-name
             self.refspec,
             env={"GIT_TERMINAL_PROMPT": "0"},
         )
-        run("git", "-C", self.dir, "checkout", "--quiet", "FETCH_HEAD")
-        # remove roles symlinks since we already cloned the role into the
-        # correct roles structure
-        for item in glob.glob(f"{self.dir}/tests/roles/*"):
-            if item.endswith("/caller"):
-                continue
-            elif os.path.islink(item):
-                os.unlink(item)
-            elif os.path.isdir(item):
-                shutil.rmtree(item)
+        run("git", "-C", self.dir.name, "checkout", "--quiet", "FETCH_HEAD")
 
-        return {"tmp_dir": self.dir, "parent_dir": self.parent_dir.name}
+        return self.dir.name
 
     def __exit__(self, *exception):
         self.dir.cleanup()
@@ -431,9 +418,9 @@ class Task:
         try:
             with checkout_repository(
                 self.owner, self.repo, f"pull/{self.pull}/head"
-            ) as repo_clone:
+            ) as repo_tmp_dir:
                 is_supported = role_supported(
-                    f"{ repo_clone['tmp_dir'] }/meta/main.yml", distro, version
+                    f"{ repo_tmp_dir }/meta/main.yml", distro, version
                 )
                 if is_supported:
                     logging.debug(
@@ -480,10 +467,10 @@ class Task:
 
         with checkout_repository(
             self.owner, self.repo, f"pull/{self.pull}/head"
-        ) as repo_clone:
+        ) as sourcedir:
             # If test_collections is true, converts the role to the collections format.
             if test_collections:
-                os.environ["COLLECTION_SRC_PATH"] = repo_clone["tmp_dir"]
+                os.environ["COLLECTION_SRC_PATH"] = sourcedir
                 os.environ["COLLECTION_ROLE"] = self.repo
                 logging.debug(f"PYTHONPATH - {sys.path}")
                 from importlib import import_module
@@ -497,7 +484,7 @@ class Task:
 
             # Generate a playbook with a single raw task to setup the image
             # (this usually means installing python2 on the guest for ansible)
-            setup_file = os.path.join(repo_clone["tmp_dir"], "_setup.yml")
+            setup_file = os.path.join(sourcedir, "_setup.yml")
 
             # Playbook to fail when only localhost is available. This happens
             # when the inventory script fails. Then ansible-playbook would just
@@ -548,11 +535,11 @@ class Task:
             # used to be tested by running all playbooks `test/test_*.yml`.
             # Support both, but prefer the standard way. Can be removed once
             # all repos are moved over.
-            playbookglob = f"{repo_clone['tmp_dir']}/tests/tests*.yml"
+            playbookglob = f"{sourcedir}/tests/tests*.yml"
             playbooks = glob.glob(playbookglob)
 
             if not playbooks:
-                playbooks = glob.glob(f"{repo_clone['tmp_dir']}/test/test_*.yml")
+                playbooks = glob.glob(f"{sourcedir}/test/test_*.yml")
 
             if not playbooks:
                 print(
@@ -590,7 +577,7 @@ class Task:
                         # invocation of ansible-playbook, so that that it applies
                         # to the same VM as the test playbook.
                         if backend == CITOOL_BACKEND:
-                            testenv = {"ANSIBLE_ROLES_PATH": repo_clone["parent_dir"]}
+                            testenv = {}
                             if test_collections and pset["is_collection"]:
                                 testenv = {
                                     "ANSIBLE_COLLECTIONS_PATHS": collection_paths,
@@ -630,7 +617,6 @@ class Task:
                             testenv = {
                                 "TEST_SUBJECTS": image_path,
                                 "TEST_ARTIFACTS": artifactsdir,
-                                "ANSIBLE_ROLES_PATH": repo_clone["parent_dir"],
                             }
                             if test_collections and pset["is_collection"]:
                                 testenv["ANSIBLE_COLLECTIONS_PATHS"] = collection_paths
