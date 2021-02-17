@@ -447,6 +447,7 @@ class Task:
         backend,
         inventory=None,
         test_collections=False,
+        keep_results=False,
     ):
         """
         Runs the task and puts results into @artifactsdir. Puts non-public
@@ -470,6 +471,14 @@ class Task:
         ) as sourcedir:
             # If test_collections is true, converts the role to the collections format.
             if test_collections:
+                os.environ["COLLECTION_SRC_OWNER"] = "linux-system-roles"
+                collection_dest_path = tempfile.TemporaryDirectory().name
+                os.environ["COLLECTION_DEST_PATH"] = collection_dest_path
+                # The tests dir is copied to the temporary dir
+                # which is outside of the collections.
+                os.environ[
+                    "COLLECTION_TESTS_DEST_PATH"
+                ] = tempfile.TemporaryDirectory().name
                 os.environ["COLLECTION_SRC_PATH"] = sourcedir
                 os.environ["COLLECTION_ROLE"] = self.repo
                 logging.debug(f"PYTHONPATH - {sys.path}")
@@ -550,7 +559,17 @@ class Task:
 
             _playbook_set = [{"is_collection": False, "playbooks": playbooks}]
 
+            # If test_collections is true, converts the role to the collections format.
             if test_collections:
+                from importlib import import_module
+
+                _lsr = import_module("lsr_role2collection")
+                _lsr.role2collection()
+                collection_paths = (
+                    os.environ["COLLECTION_DEST_PATH"]
+                    + ":~/.ansible/collections:/usr/share/ansible/collections"
+                )
+
                 playbookglob = (
                     os.environ["COLLECTION_TESTS_DEST_PATH"]
                     + "/tests/"
@@ -681,6 +700,10 @@ class Task:
                         return False
 
                     print("SUCCESS")
+
+            if test_collections and not keep_results:
+                cleanup_collection_tempdirs()
+
             logging.debug(f"test passed for {artifactsdir}")
             return True
 
@@ -1026,6 +1049,7 @@ def handle_task(
                     args.backend,
                     inventory=args.inventory,
                     test_collections=test_collections,
+                    keep_results=args.keep_results,
                 )
                 logging.debug(f"task result {result} for {artifactsdir}")
                 if result:
@@ -1324,13 +1348,6 @@ def main():
         open(role2collection_path, "wb").write(r2c.content)
         logging.debug(f"Write lsr_role2collection to {role2collection_path}")
         sys.path.append(r2c_path)
-
-        os.environ["COLLECTION_SRC_OWNER"] = "linux-system-roles"
-        collection_dest_path = tempfile.TemporaryDirectory().name
-        os.environ["COLLECTION_DEST_PATH"] = collection_dest_path
-        # The tests dir is copied to the temporary dir
-        # which is outside of the collections.
-        os.environ["COLLECTION_TESTS_DEST_PATH"] = tempfile.TemporaryDirectory().name
         logging.debug(f"Appended {r2c_path} to PYTHONPATH")
 
     image_patterns = args.use_images.split(",")
@@ -1466,9 +1483,6 @@ def main():
         # At this point, we have (probably) printed other messages, so
         # reset printed_waiting
         printed_waiting = False
-
-    if test_collections and not args.keep_results:
-        cleanup_collection_tempdirs()
 
 
 if __name__ == "__main__":
