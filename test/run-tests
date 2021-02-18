@@ -447,6 +447,7 @@ class Task:
         backend,
         inventory=None,
         test_collections=False,
+        keep_results=False,
     ):
         """
         Runs the task and puts results into @artifactsdir. Puts non-public
@@ -472,6 +473,12 @@ class Task:
             if test_collections:
                 os.environ["COLLECTION_SRC_PATH"] = sourcedir
                 os.environ["COLLECTION_ROLE"] = self.repo
+                os.environ["COLLECTION_DEST_PATH"] = tempfile.TemporaryDirectory().name
+                # The tests dir is copied to the temporary dir
+                # which is outside of the collections.
+                os.environ[
+                    "COLLECTION_TESTS_DEST_PATH"
+                ] = tempfile.TemporaryDirectory().name
                 logging.debug(f"PYTHONPATH - {sys.path}")
                 from importlib import import_module
 
@@ -678,9 +685,13 @@ class Task:
 
                         print("FAILURE")
                         logging.debug(f"test failed for {artifactsdir}")
+                        if test_collections and not keep_results:
+                            cleanup_collection_tempdirs(remove_script=False)
                         return False
 
                     print("SUCCESS")
+            if test_collections and not keep_results:
+                cleanup_collection_tempdirs(remove_script=False)
             logging.debug(f"test passed for {artifactsdir}")
             return True
 
@@ -923,14 +934,15 @@ def make_html(source_file):
     return html_file
 
 
-def cleanup_collection_tempdirs():
+def cleanup_collection_tempdirs(remove_script=True):
     if os.path.isdir(os.environ["COLLECTION_TESTS_DEST_PATH"]):
         shutil.rmtree(os.environ["COLLECTION_TESTS_DEST_PATH"])
     if os.path.isdir(os.environ["COLLECTION_DEST_PATH"]):
         shutil.rmtree(os.environ["COLLECTION_DEST_PATH"])
-    for pp in sys.path:
-        if os.path.isdir(pp) and str.startswith(pp, "/tmp/tmp"):
-            shutil.rmtree(pp)
+    if remove_script:
+        for pp in sys.path:
+            if os.path.isdir(pp) and str.startswith(pp, "/tmp/tmp"):
+                shutil.rmtree(pp)
 
 
 def handle_task(
@@ -1026,6 +1038,7 @@ def handle_task(
                     args.backend,
                     inventory=args.inventory,
                     test_collections=test_collections,
+                    keep_results=args.keep_results,
                 )
                 logging.debug(f"task result {result} for {artifactsdir}")
                 if result:
@@ -1324,14 +1337,8 @@ def main():
         open(role2collection_path, "wb").write(r2c.content)
         logging.debug(f"Write lsr_role2collection to {role2collection_path}")
         sys.path.append(r2c_path)
-
-        os.environ["COLLECTION_SRC_OWNER"] = "linux-system-roles"
-        collection_dest_path = tempfile.TemporaryDirectory().name
-        os.environ["COLLECTION_DEST_PATH"] = collection_dest_path
-        # The tests dir is copied to the temporary dir
-        # which is outside of the collections.
-        os.environ["COLLECTION_TESTS_DEST_PATH"] = tempfile.TemporaryDirectory().name
         logging.debug(f"Appended {r2c_path} to PYTHONPATH")
+        os.environ["COLLECTION_SRC_OWNER"] = "linux-system-roles"
 
     image_patterns = args.use_images.split(",")
     # copy all images to test_images . . .
@@ -1468,7 +1475,7 @@ def main():
         printed_waiting = False
 
     if test_collections and not args.keep_results:
-        cleanup_collection_tempdirs()
+        cleanup_collection_tempdirs(remove_script=True)
 
 
 if __name__ == "__main__":
