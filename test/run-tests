@@ -537,6 +537,21 @@ class Task:
             with open(setup_file, "w") as outfile:
                 yaml.dump(setup_plays, outfile)
 
+            # Install tests requirements if there are any.
+            requirements_file = os.path.join(sourcedir, "tests", "requirements.yml")
+            if os.path.exists(requirements_file):
+                roles_path = os.path.join(sourcedir, "tests", "roles")
+                if not os.path.exists(roles_path):
+                    os.mkdir(roles_path)
+                run(
+                    "ansible-galaxy",
+                    "install",
+                    "--roles-path",
+                    roles_path,
+                    "-r",
+                    requirements_file,
+                )
+
             # Fedora's standard test invocation spec mandates running all
             # playbooks matching `tests/tests*.yml`, but linux-system-roles
             # used to be tested by running all playbooks `test/test_*.yml`.
