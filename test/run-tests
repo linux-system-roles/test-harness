@@ -1104,7 +1104,7 @@ def handle_task(
                 if scp(workdir, f"{results_destination}/{results_dir}", args.secrets):
                     target_url = f"{results_url}/{results_dir}/artifacts/test.log.html"
                 else:
-                    state = "error"
+                    logging.error("Could not upload results - check ssh keys")
                     description += ": Error uploading results"
             else:
                 # move files to private_artifactsdir
