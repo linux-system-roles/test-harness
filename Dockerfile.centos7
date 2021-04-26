@@ -3,11 +3,10 @@ FROM registry.centos.org/centos/centos:7
 RUN yum update -y && PKGS="centos-release-ansible-28 python2-jmespath python-netaddr centos-release-scl-rh" && \
     yum install -y $PKGS && rpm -V $PKGS && \
     PKGS="ansible epel-release rsync" && yum install -y $PKGS && rpm -V $PKGS && \
-    PKGS="python36-fmf" && yum install -y $PKGS && rpm -V $PKGS && \
     PKGS="rh-git218 python3-pip standard-test-roles seabios-bin" && \
     yum -y install $PKGS && rpm -V $PKGS && \
     yum clean all && \
-    pip3 install cachecontrol productmd
+    pip3 install cachecontrol fmf productmd
 
 RUN curl -s -o /usr/share/ansible/inventory/standard-inventory-qcow2 \
     https://pagure.io/standard-test-roles/raw/ce0ce5eb049c886a0cb4ecbd3f4c9b409693ba4a/f/inventory/standard-inventory-qcow2
