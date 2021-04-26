@@ -774,7 +774,7 @@ def get_statuses(gh, owner, repo, sha, max_num_statuses):
 
 
 def get_comments(gh, owner, repo, pullnr, after=""):
-    """ Get comments for a pull request, optionally after a certain time """
+    """Get comments for a pull request, optionally after a certain time"""
     result = gh.get(f"repos/{owner}/{repo}/issues/{pullnr}/comments")
     comments = []
     if result.status_code == 200:
@@ -791,7 +791,7 @@ def get_comments(gh, owner, repo, pullnr, after=""):
 
 
 def get_comment_commands(gh, owner, repo, pullnr):
-    """ Returns dict with last occurence of each command """
+    """Returns dict with last occurence of each command"""
     commands = {
         COMMENT_CMD_TEST_ALL: "",
         COMMENT_CMD_TEST_BAD: "",
@@ -865,7 +865,7 @@ def choose_task(gh, repos, images, config, ansible_id, args):
 
 
 def check_commit_needs_testing(status, commands):
-    """ Check if commit needs to be checked """
+    """Check if commit needs to be checked"""
 
     # Check it, if there's no status for it yet
     if not status:
@@ -909,7 +909,7 @@ def check_commit_needs_testing(status, commands):
 
 
 def scp(source, destination, secrets):
-    """ Wrapper around scp to upload logs """
+    """Wrapper around scp to upload logs"""
     result = run(
         "scp",
         "-o",
@@ -925,7 +925,7 @@ def scp(source, destination, secrets):
 
 
 def make_html(source_file):
-    """ Create simple html file with navigation links from test.log  """
+    """Create simple html file with navigation links from test.log"""
     links = {"index": ".", "ansible log": "ansible.log"}
     html_file = source_file + ".html"
 
@@ -963,7 +963,7 @@ def cleanup_collection_tempdirs(remove_script=True):
 def handle_task(
     gh, args, config, task, ansible_id, dry_run=False, test_collections=False
 ):
-    """ Process a task """
+    """Process a task"""
     title = f"{HOSTNAME}: {task.owner}/{task.repo}: pull #{task.pull} "
     title += f'({task.head[:7]}) on {task.image["name"]}'
     logging.info(">>> " + title)
