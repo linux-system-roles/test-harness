@@ -1345,15 +1345,24 @@ def main():
     # If test_collections is true, download lsr_role2collection.py
     test_collections = args.collections
     if test_collections:
-        r2c_url = "https://raw.githubusercontent.com/linux-system-roles/auto-maintenance/master/lsr_role2collection.py"  # noqa:E501
+        base_url = (
+            "https://raw.githubusercontent.com/linux-system-roles"
+            "/auto-maintenance/master"
+        )
+        r2c_url = f"{base_url}/lsr_role2collection.py"
         r2c = requests.get(r2c_url, allow_redirects=True)
         r2c_path = tempfile.mkdtemp()
         role2collection_path = r2c_path + "/lsr_role2collection.py"
         open(role2collection_path, "wb").write(r2c.content)
-        logging.debug(f"Write lsr_role2collection to {role2collection_path}")
+        runtime_url = f"{base_url}/lsr_role2collection/runtime.yml"
+        runtime = requests.get(runtime_url, allow_redirects=True)
+        runtime_path = r2c_path + "/runtime.yml"
+        open(runtime_path, "wb").write(runtime.content)
+        logging.debug(f"Write lsr_role2collection and runtime.yml to {r2c_path}")
         sys.path.append(r2c_path)
         logging.debug(f"Appended {r2c_path} to PYTHONPATH")
         os.environ["COLLECTION_SRC_OWNER"] = "linux-system-roles"
+        os.environ["COLLECTION_META_RUNTIME"] = runtime_path
 
     image_patterns = args.use_images.split(",")
     # copy all images to test_images . . .
