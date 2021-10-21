@@ -592,6 +592,8 @@ class Task:
                 for playbook in sorted(pset["playbooks"]):
                     print(f"Testing {playbook}...", end="")
                     with redirect_output(output_log, mode="a"):
+                        testenv = self.image.get("env", {})
+
                         # Use the qcow2 inventory from standard-test-roles, which
                         # boots a transient VM and runs the playbook against that.
                         # Create a fresh instance for each test playbook. However,
@@ -599,11 +601,12 @@ class Task:
                         # invocation of ansible-playbook, so that that it applies
                         # to the same VM as the test playbook.
                         if backend == CITOOL_BACKEND:
-                            testenv = {}
                             if test_collections and pset["is_collection"]:
-                                testenv = {
-                                    "ANSIBLE_COLLECTIONS_PATHS": collection_paths,
-                                }
+                                testenv.update(
+                                    {
+                                        "ANSIBLE_COLLECTIONS_PATHS": collection_paths,
+                                    }
+                                )
                             result = run(
                                 CITOOL_COMMAND,
                                 "-o",
@@ -636,10 +639,12 @@ class Task:
                                 cwd=os.path.dirname(playbook),
                             )
                         elif backend == KVM_BACKEND:
-                            testenv = {
-                                "TEST_SUBJECTS": image_path,
-                                "TEST_ARTIFACTS": artifactsdir,
-                            }
+                            testenv.update(
+                                {
+                                    "TEST_SUBJECTS": image_path,
+                                    "TEST_ARTIFACTS": artifactsdir,
+                                }
+                            )
                             if test_collections and pset["is_collection"]:
                                 testenv["ANSIBLE_COLLECTIONS_PATHS"] = collection_paths
                             result = run(
