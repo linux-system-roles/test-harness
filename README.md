@@ -58,7 +58,7 @@ $ oc rollout latest dc/linux-system-roles-staging
 
 ## Installation
 
-A docker container which runs integration tests for open pull requests on
+A podman container which runs integration tests for open pull requests on
 [linux system roles](https://linux-system-roles.github.io) repositories. It runs
 all playbooks matching `tests/tests*.yml` (intentionally identical to
 the pattern used in the Fedora Standard Test Interface) of the
@@ -66,8 +66,16 @@ repository against various virtual machines.
 
 If using OpenShift, see below.
 
-To build the container for local testing, run
+To build a container for local testing, run
 
+```
+buildah [--log-level debug] bud -f Dockerfile[.ext] -t lsr:{latest,$name} .
+```
+If `buildah` seems to hang, Ctrl-C, then rerun with the log level.  For example
+```
+buildah --log-level debug bud -f Dockerfile -t lsr:latest .
+```
+You can also use `podman` or `docker`.
 ```
 podman build -t linuxsystemroles/test-harness:latest .
 ```
@@ -421,7 +429,15 @@ each deployment up or down and do many other operations.
 
 ## Logging
 
-To change the log level, use `oc edit configmap config` or `oc edit configmap config-staging` and edit the `"logging"` section - change both the `"level"` and the `"stderr_level"` or `"file_level"`.  You will need to rollout the `dc` for the change to go into effect (there is no trigger for configmap changes):
+If you want to turn on debug logging for a particular deployment, just set
+`TEST_HARNESS_DEBUG=true` in the deployment config e.g.
+`oc set env dc/linux-system-roles TEST_HARNESS_DEBUG=true`
+
+If you need to do more fine-grained log level setting, use `oc edit configmap
+config` or `oc edit configmap config-staging` and edit the `"logging"` section -
+change both the `"level"` and the `"stderr_level"` or `"file_level"`.  You will
+need to rollout the `dc` for the change to go into effect (there is no trigger
+for configmap changes):
 
 ```
 $ oc edit configmap config
