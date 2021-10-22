@@ -9,18 +9,20 @@ RUN yum update -y && PKGS="centos-release-ansible-29 python2-jmespath python-net
     pip3 install cachecontrol fmf productmd
 
 RUN curl -s -o /usr/share/ansible/inventory/standard-inventory-qcow2 \
-    https://pagure.io/standard-test-roles/raw/ce0ce5eb049c886a0cb4ecbd3f4c9b409693ba4a/f/inventory/standard-inventory-qcow2
+    https://pagure.io/standard-test-roles/raw/master/f/inventory/standard-inventory-qcow2
 
 RUN curl -L -o /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.2/dumb-init_1.2.2_x86_64
 RUN chmod +x /usr/local/bin/dumb-init
 
-RUN useradd -m tester
-USER tester
-
 COPY test /test
+# for role2collection support
+RUN curl -s -o /test/lsr_role2collection.py \
+    https://raw.githubusercontent.com/linux-system-roles/auto-maintenance/master/lsr_role2collection.py
+RUN curl -s -o /test/runtime.yml \
+    https://raw.githubusercontent.com/linux-system-roles/auto-maintenance/master/lsr_role2collection/runtime.yml
+ENV COLLECTION_SRC_OWNER=linux-system-roles COLLECTION_META_RUNTIME=/test/runtime.yml
 
 VOLUME /config /secrets /cache
 
-WORKDIR /home/tester
 ENTRYPOINT ["/usr/local/bin/dumb-init", "--"]
 CMD ["scl", "enable", "rh-git218", "/test/run-tests"]

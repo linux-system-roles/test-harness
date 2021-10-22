@@ -51,6 +51,8 @@ CITOOL_COMMAND = "/entrypoint.sh"
 URL_XATTR = "user.xdg.origin.url"
 DATE_XATTR = "user.dublincore.date"
 
+GITHUB_MAX_PAGE_SIZE = 100
+
 
 class TransientErrorWaitTime:
     TIME_DEFAULT = 30
@@ -371,9 +373,15 @@ class Task:
         self.pull = pull
         self.head = head
         self.image = image
-        self.inventory = "/usr/share/ansible/inventory/standard-inventory-qcow2"
 
         self.id_ = f"pull-{owner}_{repo}-{pull}-{self.head[:7]}-" + image["name"]
+        if self.pull == "0":
+            self.refspec = "HEAD"
+        else:
+            self.refspec = f"pull/{self.pull}/head"
+
+    def is_pr(self):
+        return self.pull != "0"
 
     def __str__(self):
         return f"task {self.owner}/{self.repo}/{self.pull}:{self.image['name']}"
@@ -417,7 +425,7 @@ class Task:
 
         try:
             with checkout_repository(
-                self.owner, self.repo, f"pull/{self.pull}/head"
+                self.owner, self.repo, self.refspec
             ) as repo_tmp_dir:
                 is_supported = role_supported(
                     f"{ repo_tmp_dir }/meta/main.yml", distro, version
@@ -443,11 +451,7 @@ class Task:
         self,
         artifactsdir,
         private_artifactsdir,
-        cachedir,
-        backend,
-        inventory=None,
-        test_collections=False,
-        keep_results=False,
+        args,
     ):
         """
         Runs the task and puts results into @artifactsdir. Puts non-public
@@ -455,37 +459,55 @@ class Task:
         tests succeeded.
         """
 
-        if not inventory:
-            inventory = self.inventory
-
-        if backend == KVM_BACKEND:
+        if args.backend == KVM_BACKEND:
             image_url = self.get_url()
             if not image_url:
                 return None
-            image_path = fetch_image(image_url, cachedir, self.image["name"])
+            image_path = fetch_image(image_url, args.cache, self.image["name"])
             if not image_path:
                 return None
 
-        with checkout_repository(
-            self.owner, self.repo, f"pull/{self.pull}/head"
-        ) as sourcedir:
-            # If test_collections is true, converts the role to the collections format.
-            if test_collections:
+        with checkout_repository(self.owner, self.repo, self.refspec) as sourcedir:
+            # If args.collections is true, converts the role to the collections format.
+            collection_dest_path = tempfile.TemporaryDirectory().name
+            need_collections_paths = False
+            if args.collections:
                 os.environ["COLLECTION_SRC_PATH"] = sourcedir
                 os.environ["COLLECTION_ROLE"] = self.repo
-                os.environ["COLLECTION_DEST_PATH"] = tempfile.TemporaryDirectory().name
+                os.environ["COLLECTION_DEST_PATH"] = collection_dest_path
                 # The tests dir is copied to the temporary dir
                 # which is outside of the collections.
                 os.environ[
                     "COLLECTION_TESTS_DEST_PATH"
                 ] = tempfile.TemporaryDirectory().name
-                logging.debug(f"PYTHONPATH - {sys.path}")
-                from importlib import import_module
+                # we share the root logger with role2collection - disable logging here
+                save_level = logging.getLogger().level
+                try:
+                    logging.getLogger().setLevel(logging.ERROR)
+                    lsr_r2c_module.role2collection()
+                finally:
+                    logging.getLogger().setLevel(save_level)
+                need_collections_paths = True
 
-                _lsr = import_module("lsr_role2collection")
-                _lsr.role2collection()
+            # Install runtime requirements if there are any.
+            requirements_file = os.path.join(sourcedir, "meta", "requirements.yml")
+            if os.path.exists(requirements_file):
+                run(
+                    "ansible-galaxy",
+                    "collection",
+                    "install",
+                    "-vv",
+                    "-p",
+                    collection_dest_path,
+                    "-r",
+                    requirements_file,
+                )
+                need_collections_paths = True
+                os.environ["COLLECTION_DEST_PATH"] = collection_dest_path
+
+            if need_collections_paths:
                 collection_paths = (
-                    os.environ["COLLECTION_DEST_PATH"]
+                    collection_dest_path
                     + ":~/.ansible/collections:/usr/share/ansible/collections"
                 )
 
@@ -537,21 +559,6 @@ class Task:
             with open(setup_file, "w") as outfile:
                 yaml.dump(setup_plays, outfile)
 
-            # Install tests requirements if there are any.
-            requirements_file = os.path.join(sourcedir, "tests", "requirements.yml")
-            if os.path.exists(requirements_file):
-                roles_path = os.path.join(sourcedir, "tests", "roles")
-                if not os.path.exists(roles_path):
-                    os.mkdir(roles_path)
-                run(
-                    "ansible-galaxy",
-                    "install",
-                    "--roles-path",
-                    roles_path,
-                    "-r",
-                    requirements_file,
-                )
-
             # Fedora's standard test invocation spec mandates running all
             # playbooks matching `tests/tests*.yml`, but linux-system-roles
             # used to be tested by running all playbooks `test/test_*.yml`.
@@ -572,7 +579,7 @@ class Task:
 
             _playbook_set = [{"is_collection": False, "playbooks": playbooks}]
 
-            if test_collections:
+            if args.collections:
                 playbookglob = (
                     os.environ["COLLECTION_TESTS_DEST_PATH"]
                     + "/tests/"
@@ -584,7 +591,7 @@ class Task:
                 )
 
             ansible_log = f"{artifactsdir}/ansible.log"
-            if backend == CITOOL_BACKEND:
+            if args.backend == CITOOL_BACKEND:
                 output_log = f"{private_artifactsdir}/citool.log"
             else:
                 output_log = ansible_log
@@ -600,8 +607,8 @@ class Task:
                         # we do need to run the setup (if it exists) in the same
                         # invocation of ansible-playbook, so that that it applies
                         # to the same VM as the test playbook.
-                        if backend == CITOOL_BACKEND:
-                            if test_collections and pset["is_collection"]:
+                        if args.backend == CITOOL_BACKEND:
+                            if need_collections_paths or pset["is_collection"]:
                                 testenv.update(
                                     {
                                         "ANSIBLE_COLLECTIONS_PATHS": collection_paths,
@@ -638,19 +645,30 @@ class Task:
                                 check=False,
                                 cwd=os.path.dirname(playbook),
                             )
-                        elif backend == KVM_BACKEND:
+                        elif args.backend == KVM_BACKEND:
                             testenv.update(
                                 {
                                     "TEST_SUBJECTS": image_path,
                                     "TEST_ARTIFACTS": artifactsdir,
                                 }
                             )
-                            if test_collections and pset["is_collection"]:
+                            if need_collections_paths or pset["is_collection"]:
                                 testenv["ANSIBLE_COLLECTIONS_PATHS"] = collection_paths
+                            logging.debug(
+                                "Running playbook env [%s] directory [%s] "
+                                "is present [%s]",
+                                str(testenv),
+                                collection_dest_path,
+                                str(os.path.isdir(collection_dest_path)),
+                            )
+                            verbosity = "-vv"
+                            if args.debug:
+                                verbosity = "-vvv"
                             result = run(
                                 "ansible-playbook",
-                                "-vv",
-                                f"--inventory={inventory}",
+                                verbosity,
+                                f"--inventory={args.inventory}",
+                                f"--skip-tags={args.skip_tags}",
                                 setup_file,
                                 playbook,
                                 env=testenv,
@@ -661,7 +679,7 @@ class Task:
                         else:
                             assert False, "unreachable"
 
-                    if backend == CITOOL_BACKEND:
+                    if args.backend == CITOOL_BACKEND:
                         ptrn = re.compile(
                             f"{playbook}] Ansible logs are in (.+/ansible-output.txt)"
                         )
@@ -705,12 +723,12 @@ class Task:
 
                         print("FAILURE")
                         logging.debug(f"test failed for {artifactsdir}")
-                        if test_collections and not keep_results:
+                        if need_collections_paths and not args.keep_results:
                             cleanup_collection_tempdirs(remove_script=False)
                         return False
 
                     print("SUCCESS")
-            if test_collections and not keep_results:
+            if need_collections_paths and not args.keep_results:
                 cleanup_collection_tempdirs(remove_script=False)
             logging.debug(f"test passed for {artifactsdir}")
             return True
@@ -753,46 +771,49 @@ def get_statuses(gh, owner, repo, sha, max_num_statuses):
     """
     Fetches all statuses of the given commit in a repository and returns a dict
     mapping context to its most recent status.
-    Will return at most max_num_statuses.   By default, github will return 30, but
-    some of our PRs have more than that.
     """
     # https://developer.github.com/v3/repos/statuses/#get-the-combined-status-for-a-specific-ref
-    status = gh.get(
-        f"repos/{owner}/{repo}/commits/{sha}/status?per_page={max_num_statuses}"
-    ).json()
-    if status["total_count"] > len(status["statuses"]):
-        # error - there are too many statuses
-        if max_num_statuses <= len(status["statuses"]):
-            logging.error(
-                f"Total number of statuses {status['total_count']} exceeds "
-                f"max_num_statuses {max_num_statuses} statuses for "
-                f"{owner}/{repo}/commits/{sha} - please increase max_num_statuses"
-            )
-        else:
-            # hit hard limit - will have to use paging :-(
-            logging.error(
-                f"Total number of statuses {status['total_count']} exceeds "
-                f"max_num_statuses {max_num_statuses} statuses for "
-                f"{owner}/{repo}/commits/{sha} - need to use paging"
-            )
-    return {x["context"]: x for x in status["statuses"]}
+    data = {}
+    url = f"repos/{owner}/{repo}/commits/{sha}/status?per_page={max_num_statuses}"
+    while url:
+        response = gh.get(url)
+        status = response.json()
+        for item in status["statuses"]:
+            data[item["context"]] = item
+        url = response.links.get("next", {}).get("url")
+        if url:
+            url = url.replace(gh.host + "/", "")
+    return data
 
 
-def get_comments(gh, owner, repo, pullnr, after=""):
+def get_comments(gh, owner, repo, pullnr):
     """Get comments for a pull request, optionally after a certain time"""
-    result = gh.get(f"repos/{owner}/{repo}/issues/{pullnr}/comments")
-    comments = []
-    if result.status_code == 200:
-        comments = result.json()
+    total_comments = []
+    url = (
+        f"repos/{owner}/{repo}/issues/{pullnr}/comments?per_page={GITHUB_MAX_PAGE_SIZE}"
+    )
+    while url:
+        response = gh.get(url)
+        comments = response.json()
+        total_comments.extend(comments)
+        url = response.links.get("next", {}).get("url")
+        if url:
+            url = url.replace(gh.host + "/", "")
+    return total_comments
 
-    new_comments = []
-    for comment in comments:
-        comment_update = comment["updated_at"]
-        if comment_update > after:
-            new_comments.append(comment)
-    comments = new_comments
 
-    return comments
+def get_pull_requests(gh, owner, repo):
+    """Get comments for a pull request, optionally after a certain time"""
+    total_prs = []
+    url = f"repos/{owner}/{repo}/pulls?per_page={GITHUB_MAX_PAGE_SIZE}"
+    while url:
+        response = gh.get(url)
+        prs = response.json()
+        total_prs.extend(prs)
+        url = response.links.get("next", {}).get("url")
+        if url:
+            url = url.replace(gh.host + "/", "")
+    return total_prs
 
 
 def get_comment_commands(gh, owner, repo, pullnr):
@@ -820,7 +841,7 @@ def get_status_context(variant, image_name, ansible_id):
     return f"{image_name}/{ansible_id}{suffix}"
 
 
-def choose_task(gh, repos, images, config, ansible_id, args):
+def choose_task(gh, repos, images, ansible_id, args):
     """
     Collect tasks from open pull requests (one task for each image
     and each open pull).
@@ -833,7 +854,7 @@ def choose_task(gh, repos, images, config, ansible_id, args):
     """
 
     for owner, repo in repos:
-        pulls = gh.get(f"repos/{owner}/{repo}/pulls").json()
+        pulls = get_pull_requests(gh, owner, repo)
         random.shuffle(pulls)
         for pull in pulls:
             logging.debug("Evaluating PR {}".format(pull["url"]))
@@ -955,19 +976,16 @@ def make_html(source_file):
 
 
 def cleanup_collection_tempdirs(remove_script=True):
-    if os.path.isdir(os.environ["COLLECTION_TESTS_DEST_PATH"]):
-        shutil.rmtree(os.environ["COLLECTION_TESTS_DEST_PATH"])
-    if os.path.isdir(os.environ["COLLECTION_DEST_PATH"]):
-        shutil.rmtree(os.environ["COLLECTION_DEST_PATH"])
+    for path_env_var in ["COLLECTION_TESTS_DEST_PATH", "COLLECTION_DEST_PATH"]:
+        if path_env_var in os.environ and os.path.isdir(os.environ[path_env_var]):
+            shutil.rmtree(os.environ[path_env_var])
     if remove_script:
         for pp in sys.path:
             if os.path.isdir(pp) and str.startswith(pp, "/tmp/tmp"):
                 shutil.rmtree(pp)
 
 
-def handle_task(
-    gh, args, config, task, ansible_id, dry_run=False, test_collections=False
-):
+def handle_task(gh, args, config, task, ansible_id):
     """Process a task"""
     title = f"{HOSTNAME}: {task.owner}/{task.repo}: pull #{task.pull} "
     title += f'({task.head[:7]}) on {task.image["name"]}'
@@ -983,7 +1001,8 @@ def handle_task(
 
     status_context = get_status_context(args.variant, task.image["name"], ansible_id)
 
-    if not dry_run:
+    dry_run = args.dry_run
+    if not dry_run and task.is_pr():
         logging.info("Claiming %s", task)
         # When running multiple instances of this script, there's a race
         # between choosing a task and setting the status on GitHub to "pending"
@@ -1003,7 +1022,7 @@ def handle_task(
         )
 
     try:
-        if not dry_run:
+        if not dry_run and task.is_pr():
             time.sleep(random.randint(5, 20))
 
             statuses = get_statuses(
@@ -1050,15 +1069,10 @@ def handle_task(
             print(len(title) * "=")
             print()
             try:
-                task.inventory = args.inventory
                 result = task.run(
                     artifactsdir,
                     private_artifactsdir,
-                    args.cache,
-                    args.backend,
-                    inventory=args.inventory,
-                    test_collections=test_collections,
-                    keep_results=args.keep_results,
+                    args,
                 )
                 logging.debug(f"task result {result} for {artifactsdir}")
                 if result:
@@ -1091,7 +1105,7 @@ def handle_task(
 
         local_test_log = f"{artifactsdir}/test.log"
 
-        if dry_run:
+        if dry_run and task.is_pr():
             logging.info(
                 f"Artifacts kept at: {artifactsdir}; "
                 f"private artifacts at {private_artifactsdir}"
@@ -1130,7 +1144,7 @@ def handle_task(
             state if state and state != "pending" else "abandoned",
             description,
         )
-        while not dry_run:
+        while not dry_run and task.is_pr():
             try:
                 gh.post(
                     f"repos/{task.owner}/{task.repo}/statuses/{task.head}",
@@ -1147,11 +1161,21 @@ def handle_task(
             except requests.exceptions.HTTPError as err:
                 if not handle_transient_httperrors(err):
                     raise
+        if not dry_run:
+            ratelimit = gh.get("rate_limit").json()
+            if ratelimit and isinstance(ratelimit, dict) and "rate" in ratelimit:
+                logging.info(
+                    "GitHub ratelimit info - remaining %(remaining)s used %(used)s"
+                    " limit %(limit)s reset %(reset)s",
+                    ratelimit["rate"],
+                )
+            else:
+                logging.info("Unable to get ratelimit info")
 
     print()
 
     if abort:
-        logging.critical("Fatal exception occured, aborting...")
+        logging.critical("Fatal exception occurred, aborting...")
         sys.exit(1)
 
 
@@ -1177,7 +1201,7 @@ def check_environment(args):
             sys.exit(1)
 
 
-def setup_logging(config_logging):
+def setup_logging(config_logging, args):
     log_cfg_default = {
         "format": "%(asctime)s: %(levelname)s: %(message)s",
         "datefmt": "%Y-%m-%dT%H:%M:%S%z",
@@ -1188,12 +1212,18 @@ def setup_logging(config_logging):
         for k, v in config_logging.items()
         if k in {"format", "style", "datefmt", "level"}
     )
+    if args.debug:
+        log_cfg["level"] = logging.DEBUG
 
     initial_log_message = ""
     try:
         # Add stderr handler
         stream_handler = logging.StreamHandler()
-        stream_handler.setLevel(config_logging.get("stderr_level", logging.INFO))
+        if args.debug:
+            level = logging.DEBUG
+        else:
+            level = config_logging.get("stderr_level", logging.INFO)
+        stream_handler.setLevel(level)
         handlers = [stream_handler]
 
         if "filename" in config_logging:
@@ -1202,7 +1232,11 @@ def setup_logging(config_logging):
             filename = config_logging["filename"].replace("HOSTNAME", HOSTNAME)
             try:
                 file_handler = logging.FileHandler(filename)
-                file_handler.setLevel(config_logging.get("file_level", logging.NOTSET))
+                if args.debug:
+                    level = logging.DEBUG
+                else:
+                    level = config_logging.get("file_level", logging.NOTSET)
+                file_handler.setLevel(level)
                 handlers.append(file_handler)
             except PermissionError:
                 # running as non-root user, but trying to write to /var/log, usually -
@@ -1224,7 +1258,13 @@ def setup_logging(config_logging):
 def get_ansible_version():
     """determine the version of Ansible"""
     rs = run("ansible", "--version", return_stdout=True)
-    return rs.stdout.split()[1]
+    match = re.match(r"^ansible \[core (\d+[.]\d+[.]\d+).*", rs.stdout)
+    if match and match.groups() and match.group(1):
+        return match.group(1)
+    match = re.match(r"^ansible (\d+[.]\d+[.]\d+).*", rs.stdout)
+    if match and match.groups() and match.group(1):
+        return match.group(1)
+    raise Exception(f"Could not determine ansible version from {rs.stdout}")
 
 
 def main():
@@ -1299,8 +1339,13 @@ def main():
     parser.add_argument(
         "--max-num-statuses",
         type=int,
-        default=int(os.environ.get("TEST_HARNESS_MAX_NUM_STATUSES", "99")),
-        help="Number of statuses to retrieve - default 99 - github default is 30",
+        default=int(
+            os.environ.get("TEST_HARNESS_MAX_NUM_STATUSES", str(GITHUB_MAX_PAGE_SIZE))
+        ),
+        help=(
+            f"Number of statuses to retrieve - default {GITHUB_MAX_PAGE_SIZE} - "
+            "github default is 30"
+        ),
     )
     parser.add_argument(
         "--backend",
@@ -1313,6 +1358,17 @@ def main():
         default=bool(strtobool(os.environ.get("TEST_HARNESS_COLLECTIONS", "False"))),
         action="store_true",
         help="Run CI tests in the roles and collections formats",
+    )
+    parser.add_argument(
+        "--skip-tags",
+        default=os.environ.get("TEST_HARNESS_SKIP_TAGS", "tests::cleanup"),
+        help="ansible-playbook --skip-tags value",
+    )
+    parser.add_argument(
+        "--debug",
+        default=bool(strtobool(os.environ.get("TEST_HARNESS_DEBUG", "False"))),
+        action="store_true",
+        help="Enable debugging",
     )
 
     args = parser.parse_args()
@@ -1338,7 +1394,12 @@ def main():
 
     if args.repositories:
         repos = [r.split("/") for r in args.repositories.split(",")]
-    setup_logging(config.get("logging", {}))
+    if args.collections:
+        from importlib import import_module
+
+        global lsr_r2c_module
+        lsr_r2c_module = import_module("lsr_role2collection")
+    setup_logging(config.get("logging", {}), args)
 
     check_environment(args)
 
@@ -1346,28 +1407,6 @@ def main():
     logging.info("Using Ansible version {}".format(ansible_version))
     # this is used in PR status - context name
     ansible_id = f"ansible-{ansible_version.version[0]}.{ansible_version.version[1]}"
-
-    # If test_collections is true, download lsr_role2collection.py
-    test_collections = args.collections
-    if test_collections:
-        base_url = (
-            "https://raw.githubusercontent.com/linux-system-roles"
-            "/auto-maintenance/master"
-        )
-        r2c_url = f"{base_url}/lsr_role2collection.py"
-        r2c = requests.get(r2c_url, allow_redirects=True)
-        r2c_path = tempfile.mkdtemp()
-        role2collection_path = r2c_path + "/lsr_role2collection.py"
-        open(role2collection_path, "wb").write(r2c.content)
-        runtime_url = f"{base_url}/lsr_role2collection/runtime.yml"
-        runtime = requests.get(runtime_url, allow_redirects=True)
-        runtime_path = r2c_path + "/runtime.yml"
-        open(runtime_path, "wb").write(runtime.content)
-        logging.debug(f"Write lsr_role2collection and runtime.yml to {r2c_path}")
-        sys.path.append(r2c_path)
-        logging.debug(f"Appended {r2c_path} to PYTHONPATH")
-        os.environ["COLLECTION_SRC_OWNER"] = "linux-system-roles"
-        os.environ["COLLECTION_META_RUNTIME"] = runtime_path
 
     image_patterns = args.use_images.split(",")
     # copy all images to test_images . . .
@@ -1442,10 +1481,11 @@ def main():
 
     printed_waiting = False
 
-    # Random delay at startup to prevent triggering abuse detection on GitHub
-    # when multiple instances are started in same time
-    if not args.dry_run:
-        time.sleep(random.randint(0, 60))
+    # special mode - test all roles
+    if args.pull_request == ["ALL"]:
+        args.pull_request = []
+        for owner, repo in repos:
+            args.pull_request.append(f"{owner}/{repo}/0")
 
     for pull_request in args.pull_request:
         logging.debug(f"Processing command line pull request {pull_request}")
@@ -1455,12 +1495,16 @@ def main():
             parsed_url.path.strip("/").replace("/pull/", "/").split("/")
         )
 
-        head = parsed_url.fragment
-        pull = gh.get(f"repos/{owner}/{repo}/pulls/{pullnr}").json()
+        if pullnr != "0":
+            head = parsed_url.fragment
+            pull = gh.get(f"repos/{owner}/{repo}/pulls/{pullnr}").json()
 
-        if not head:
-            head = pull["head"]["sha"]
-        number = pull["number"]
+            if not head:
+                head = pull["head"]["sha"]
+            number = pull["number"]
+        else:
+            head = "HEAD"
+            number = "0"
 
         for image in test_images:
             task = Task(owner, repo, number, head, image)
@@ -1470,13 +1514,16 @@ def main():
                 config,
                 task,
                 ansible_id,
-                dry_run=args.dry_run,
-                test_collections=test_collections,
             )
+
+    # Random delay at startup to prevent triggering abuse detection on GitHub
+    # when multiple instances are started in same time
+    if not args.dry_run:
+        time.sleep(random.randint(0, 60))
 
     while not args.pull_request:
         try:
-            task = choose_task(gh, repos, test_images, config, ansible_id, args)
+            task = choose_task(gh, repos, test_images, ansible_id, args)
             if not task:
                 if not printed_waiting:
                     logging.info(">>> No tasks. Waiting.")
@@ -1492,8 +1539,6 @@ def main():
                 config,
                 task,
                 ansible_id,
-                dry_run=args.dry_run,
-                test_collections=test_collections,
             )
         except requests.exceptions.HTTPError as err:
             if not handle_transient_httperrors(err):
@@ -1503,7 +1548,7 @@ def main():
         # reset printed_waiting
         printed_waiting = False
 
-    if test_collections and not args.keep_results:
+    if args.collections and not args.keep_results:
         cleanup_collection_tempdirs(remove_script=True)
 
 

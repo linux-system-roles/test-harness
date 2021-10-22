@@ -1,21 +1,24 @@
-FROM registry.fedoraproject.org/fedora:34
+FROM quay.io/ansible/ansible-runner:stable-2.12-devel
 
-USER 0
-
-RUN dnf update -y && dnf install -y \
-    ansible \
-    dumb-init \
+# standard-test-roles pulls in ansible - remove it
+RUN dnf update --enablerepo=epel -y && dnf install --enablerepo=epel -y \
     git \
     rsync \
-    python3-netaddr \
+    openssl \
     python3-requests \
-    python3-CacheControl \
     python3-productmd \
+    python3-pip \
     python3-ruamel-yaml \
-    standard-test-roles && dnf clean all
+    standard-test-roles && \
+    rpm -e --nodeps ansible && \
+    dnf clean all && \
+    python3.6 -mpip install cachecontrol && \
+    python3 -mpip install netaddr
 
-RUN curl -v -o /usr/share/ansible/inventory/standard-inventory-qcow2 \
+RUN curl -s -o /usr/share/ansible/inventory/standard-inventory-qcow2 \
     https://pagure.io/standard-test-roles/raw/master/f/inventory/standard-inventory-qcow2
+# change it to use python 3.6
+RUN sed -i 's,/usr/bin/python3$,/usr/bin/python3.6,' /usr/share/ansible/inventory/standard-inventory-qcow2
 
 COPY test /test
 # for role2collection support
@@ -25,13 +28,6 @@ RUN curl -s -o /test/runtime.yml \
     https://raw.githubusercontent.com/linux-system-roles/auto-maintenance/master/lsr_role2collection/runtime.yml
 ENV COLLECTION_SRC_OWNER=linux-system-roles COLLECTION_META_RUNTIME=/test/runtime.yml
 
-RUN useradd -m tester
-#EXTRAPRETESTER
-USER tester
-
 VOLUME /config /secrets /cache
-WORKDIR /home/tester
-ENV HOME=/home/tester
 #EXTRAPOST
-ENTRYPOINT ["/usr/bin/dumb-init", "--"]
-CMD ["/test/run-tests"]
+CMD ["/usr/bin/python3.6", "/test/run-tests"]
