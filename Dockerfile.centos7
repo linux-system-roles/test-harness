@@ -1,17 +1,17 @@
 FROM registry.centos.org/centos/centos:7
 
-RUN yum update -y && PKGS="centos-release-ansible-29 python2-jmespath python-netaddr centos-release-scl-rh" && \
+RUN yum update -y && PKGS="centos-release-ansible-29 python-netaddr centos-release-scl-rh" && \
     yum install -y $PKGS && rpm -V $PKGS && \
     PKGS="ansible epel-release rsync" && yum install -y $PKGS && rpm -V $PKGS && \
     PKGS="rh-git218 python3-pip standard-test-roles seabios-bin" && \
     yum -y install $PKGS && rpm -V $PKGS && \
     yum clean all && \
-    pip3 install cachecontrol fmf productmd
+    pip3 install cachecontrol fmf productmd PyYAML
 
 RUN curl -s -o /usr/share/ansible/inventory/standard-inventory-qcow2 \
     https://pagure.io/standard-test-roles/raw/master/f/inventory/standard-inventory-qcow2
 
-RUN curl -L -o /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.2/dumb-init_1.2.2_x86_64
+RUN curl -s -L -o /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.5/dumb-init_1.2.5_x86_64
 RUN chmod +x /usr/local/bin/dumb-init
 
 COPY test /test
