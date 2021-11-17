@@ -1,4 +1,4 @@
-FROM registry.centos.org/centos/centos:7
+FROM quay.io/centos/centos:centos7
 
 RUN yum update -y && PKGS="centos-release-ansible-29 python-netaddr centos-release-scl-rh" && \
     yum install -y $PKGS && rpm -V $PKGS && \
@@ -20,7 +20,10 @@ RUN curl -s -o /test/lsr_role2collection.py \
     https://raw.githubusercontent.com/linux-system-roles/auto-maintenance/master/lsr_role2collection.py
 RUN curl -s -o /test/runtime.yml \
     https://raw.githubusercontent.com/linux-system-roles/auto-maintenance/master/lsr_role2collection/runtime.yml
-ENV COLLECTION_SRC_OWNER=linux-system-roles COLLECTION_META_RUNTIME=/test/runtime.yml
+# There is something about running on an EL7 host with a centos7 container that is causing
+# these qemu images to crash - so skip them for now
+ENV COLLECTION_SRC_OWNER=linux-system-roles COLLECTION_META_RUNTIME=/test/runtime.yml \
+    TEST_HARNESS_SKIP_IMAGES=fedora-34,fedora-35,rhel-x
 
 VOLUME /config /secrets /cache
 
