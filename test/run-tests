@@ -1315,6 +1315,16 @@ def main():
         ),
     )
     parser.add_argument(
+        "--skip-images",
+        default=os.environ.get("TEST_HARNESS_SKIP_IMAGES"),
+        help=(
+            "Do not test pull request against images matching these patterns.  "
+            "This is a comma delimited list of fnmatch patterns which will be "
+            "applied to each image name and source.  If any of the patterns "
+            "match the name or source, the image will be skipped in testing."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         default=bool(strtobool(os.environ.get("TEST_HARNESS_DRY_RUN", "False"))),
         action="store_true",
@@ -1409,6 +1419,10 @@ def main():
     ansible_id = f"ansible-{ansible_version.version[0]}.{ansible_version.version[1]}"
 
     image_patterns = args.use_images.split(",")
+    if args.skip_images:
+        skip_image_patterns = args.skip_images.split(",")
+    else:
+        skip_image_patterns = []
     # copy all images to test_images . . .
     test_images = dict([(image["name"], image) for image in images])
     # . . . then remove the ones that do not match the criteria
@@ -1433,19 +1447,27 @@ def main():
             del test_images[image["name"]]
             continue
 
-        pattern_matched = False
+        keep_image = False
         for pattern in image_patterns:
             if fnmatch.fnmatch(image["name"], pattern) or fnmatch.fnmatch(
                 image.get("source", ""), pattern
             ):
-                pattern_matched = True
+                keep_image = True
                 break
-        if not pattern_matched:
+        for pattern in skip_image_patterns:
+            if fnmatch.fnmatch(image["name"], pattern) or fnmatch.fnmatch(
+                image.get("source", ""), pattern
+            ):
+                keep_image = False
+                break
+        if not keep_image:
             if image["name"] in test_images:
                 logging.debug(
                     f"Image {image['name']} will not be used for testing "
                     "because neither the name nor the source match any "
-                    f"of the image patterns in {image_patterns}"
+                    f"of the image patterns in {image_patterns}, or because "
+                    "the image matched one of the skip patterns in "
+                    f"{skip_image_patterns}"
                 )
                 del test_images[image["name"]]
 
