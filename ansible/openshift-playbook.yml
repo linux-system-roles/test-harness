@@ -12,7 +12,7 @@
     test_harness_node_selector:
       system-roles-ci: "true"
     test_harness_dockerfile_from: "registry.fedoraproject.org/fedora:34"
-    test_harness_dockerfile_from_centos7: "registry.centos.org/centos/centos:7"
+    test_harness_dockerfile_from_centos7: "quay.io/centos/centos:centos7"
     test_harness_build_config_files: []
     test_harness_dockerfile_pre_tester: []
     test_harness_dockerfile_post: []
