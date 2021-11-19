@@ -42,6 +42,7 @@ HOSTNAME = socket.gethostname()
 COMMENT_CMD_TEST_ALL = "[citest]"
 COMMENT_CMD_TEST_PENDING = "[citest pending]"
 COMMENT_CMD_TEST_BAD = "[citest bad]"
+COMMENT_CMD_TEST_SKIP = "[citest skip]"
 
 KVM_BACKEND = "kvm"
 CITOOL_BACKEND = "citool"
@@ -304,7 +305,7 @@ def fetch_image(url, cache, label):
         or url != origurl(path)
         or image_last_modified_by_src != image_last_modified_by_file
     ):
-        print(f"Fetch {url}")
+        logging.debug(f"Fetch {url}")
 
         image_tempfile = tempfile.NamedTemporaryFile(dir=cache, delete=False)
         try:
@@ -321,8 +322,9 @@ def fetch_image(url, cache, label):
             image_tempfile.name, DATE_XATTR, os.fsencode(image_last_modified_by_src)
         )
         os.rename(image_tempfile.name, path)
+        print(f"Pulled latest image for {image_name}")
     else:
-        print(f"Use cached {image_name}")
+        print(f"Using cached image for {image_name}")
 
     return path
 
@@ -467,6 +469,7 @@ class Task:
             if not image_path:
                 return None
 
+        run_status = True
         with checkout_repository(self.owner, self.repo, self.refspec) as sourcedir:
             # If args.collections is true, converts the role to the collections format.
             collection_dest_path = tempfile.TemporaryDirectory().name
@@ -715,31 +718,44 @@ class Task:
                             return False
 
                     if result.returncode != 0:
+                        run_status = False
                         with open(ansible_log, "r") as ansible_file:
                             for line in ansible_file:
                                 if inventory_fail_msg in line:
                                     print("ERROR: Inventory not properly set up")
-                                    return None
+                                    run_status = None
 
                         print("FAILURE")
                         logging.debug(f"test failed for {artifactsdir}")
+                    else:
+                        print("SUCCESS")
+                    if run_status is None or (
+                        not run_status and not args.run_all_tests
+                    ):
                         if need_collections_paths and not args.keep_results:
                             cleanup_collection_tempdirs(remove_script=False)
-                        return False
-
-                    print("SUCCESS")
+                        return run_status
             if need_collections_paths and not args.keep_results:
                 cleanup_collection_tempdirs(remove_script=False)
-            logging.debug(f"test passed for {artifactsdir}")
-            return True
+            if run_status:
+                logging.debug(f"test passed for {artifactsdir}")
+            else:
+                logging.debug(f"test failed for {artifactsdir}")
+            return run_status
 
 
-def pull_ok_to_test(gh, owner, repo, pull, author, head):
+def pull_ok_to_test(gh, owner, repo, pull, author, head, title):
     """
     Returns True if we trust the pull request enough to run its code. It must
     either come from a collaborator of the repository (a github user with push
     access) or be marked with the "needs-ci" tag by a collaborator.
     """
+
+    # some PRs do not need to be tested - see if
+    # COMMENT_CMD_TEST_SKIP is in title
+    if COMMENT_CMD_TEST_SKIP in title:
+        logging.debug("Skip testing this PR")
+        return False
 
     result = gh.get(f"repos/{owner}/{repo}/collaborators/{author}", check=False)
     if result.status_code == 204:
@@ -750,7 +766,7 @@ def pull_ok_to_test(gh, owner, repo, pull, author, head):
         return True
 
     # Check if a member commented with a command like
-    # ci-check-commit:<commit-hash>
+    # [citest commit:<commit-hash>]
     # to allow to check this commit
     comments = get_comments(gh, owner, repo, pull)
     whitelist_command = f"[citest commit:{head}]"
@@ -764,7 +780,9 @@ def pull_ok_to_test(gh, owner, repo, pull, author, head):
     if result.status_code == 200 and "needs-ci" in (x["name"] for x in result.json()):
         logging.debug("PR is ok to test - has needs-ci label")
         return True
+
     logging.debug("PR is not ok to test")
+    return False
 
 
 def get_statuses(gh, owner, repo, sha, max_num_statuses):
@@ -822,6 +840,7 @@ def get_comment_commands(gh, owner, repo, pullnr):
         COMMENT_CMD_TEST_ALL: "",
         COMMENT_CMD_TEST_BAD: "",
         COMMENT_CMD_TEST_PENDING: "",
+        COMMENT_CMD_TEST_SKIP: "",
     }
     comments = get_comments(gh, owner, repo, pullnr)
 
@@ -861,8 +880,9 @@ def choose_task(gh, repos, images, ansible_id, args):
             author = pull["user"]["login"]
             head = pull["head"]["sha"]
             number = pull["number"]
+            title = pull["title"]
 
-            if not pull_ok_to_test(gh, owner, repo, number, author, head):
+            if not pull_ok_to_test(gh, owner, repo, number, author, head, title):
                 continue
 
             statuses = get_statuses(gh, owner, repo, head, args.max_num_statuses)
@@ -1380,6 +1400,15 @@ def main():
         action="store_true",
         help="Enable debugging",
     )
+    parser.add_argument(
+        "--run-all-tests",
+        default=bool(strtobool(os.environ.get("TEST_HARNESS_RUN_ALL_TESTS", "False"))),
+        action="store_true",
+        help=(
+            "By default, fail fast - stop testing after first failure.  Use this "
+            "parameter to run all tests, and report failure at the end."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -1509,6 +1538,7 @@ def main():
         for owner, repo in repos:
             args.pull_request.append(f"{owner}/{repo}/0")
 
+    logging.info(f"running all tests {args.run_all_tests}")
     for pull_request in args.pull_request:
         logging.debug(f"Processing command line pull request {pull_request}")
         # supports to specify the PR with full URLs or just the path

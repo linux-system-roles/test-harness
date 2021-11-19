@@ -23,7 +23,8 @@ RUN curl -s -o /test/lsr_role2collection.py \
     https://raw.githubusercontent.com/linux-system-roles/auto-maintenance/master/lsr_role2collection.py
 RUN curl -s -o /test/runtime.yml \
     https://raw.githubusercontent.com/linux-system-roles/auto-maintenance/master/lsr_role2collection/runtime.yml
-ENV COLLECTION_SRC_OWNER=linux-system-roles COLLECTION_META_RUNTIME=/test/runtime.yml
+ENV COLLECTION_SRC_OWNER=linux-system-roles COLLECTION_META_RUNTIME=/test/runtime.yml \
+    ANSIBLE_STDOUT_CALLBACK=debug ANSIBLE_CALLBACK_WHITELIST=profile_tasks
 
 RUN useradd -m tester
 #EXTRAPRETESTER

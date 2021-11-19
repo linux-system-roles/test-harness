@@ -157,8 +157,8 @@
         __test_harness_cm_file: config.json
         __test_harness_dc: linux-system-roles-a212
         __test_harness_bc: linux-system-roles-a212
-        __test_harness_secret_name: secrets-staging
-        __test_harness_ghtoken_file: github-token-staging
+        __test_harness_secret_name: secrets
+        __test_harness_ghtoken_file: github-token
         __test_harness_deploy_replicas: "{{ test_harness_deploy_replicas_staging | d(1) }}"
         __test_harness_dockerfile: ../Dockerfile.a212
         __test_harness_dockerfile_from: "{{ test_harness_dockerfile_from_a212 }}"
