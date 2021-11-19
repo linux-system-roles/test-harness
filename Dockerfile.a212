@@ -26,7 +26,16 @@ RUN curl -s -o /test/lsr_role2collection.py \
     https://raw.githubusercontent.com/linux-system-roles/auto-maintenance/master/lsr_role2collection.py
 RUN curl -s -o /test/runtime.yml \
     https://raw.githubusercontent.com/linux-system-roles/auto-maintenance/master/lsr_role2collection/runtime.yml
-ENV COLLECTION_SRC_OWNER=linux-system-roles COLLECTION_META_RUNTIME=/test/runtime.yml
+# for callback plugin (debug, profile_tasks) support
+RUN ansible-galaxy collection install -vv -p /test/collections ansible.posix && \
+    mkdir -p /test/callback_plugins && \
+    pushd /test/collections/ansible_collections/ansible/posix/plugins/callback && \
+    mv debug.py profile_tasks.py /test/callback_plugins && \
+    popd && rm -rf /test/collections
+
+ENV COLLECTION_SRC_OWNER=linux-system-roles COLLECTION_META_RUNTIME=/test/runtime.yml \
+    ANSIBLE_CALLBACK_PLUGINS=/test/callback_plugins ANSIBLE_CALLBACKS_ENABLED=profile_tasks \
+    ANSIBLE_STDOUT_CALLBACK=debug
 
 VOLUME /config /secrets /cache
 #EXTRAPOST
