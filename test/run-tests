@@ -157,6 +157,7 @@ class Session(requests.Session):
         self.timeout = timeout
 
     def post(self, path, json_, check=True):
+        logging.debug("POST %s/%s", self.host, path)
         r = super().post(f"{self.host}/{path}", json=json_, timeout=self.timeout)
         if check:
             r.raise_for_status()
@@ -165,6 +166,7 @@ class Session(requests.Session):
         return r
 
     def get(self, path, check=True):
+        logging.debug("GET %s/%s", self.host, path)
         r = super().get(f"{self.host}/{path}", timeout=self.timeout)
         if check:
             r.raise_for_status()
@@ -483,6 +485,9 @@ class Task:
                 os.environ[
                     "COLLECTION_TESTS_DEST_PATH"
                 ] = tempfile.TemporaryDirectory().name
+                os.environ[
+                    "COLLECTION_SUBROLE_PREFIX"
+                ] = f"private_{self.repo}_subrole_"
                 # we share the root logger with role2collection - disable logging here
                 save_level = logging.getLogger().level
                 try:
