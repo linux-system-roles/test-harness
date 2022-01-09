@@ -584,6 +584,16 @@ class Task:
                     f"playbook that matches {playbookglob}."
                 )
                 return None
+            if args.only_tests:
+                playbooks = [
+                    pb for pb in playbooks for pat in args.only_tests if pat.search(pb)
+                ]
+            if not playbooks:
+                print(
+                    f"No test playbooks matched the patterns given.  Please specify a "
+                    f"pattern that matches one of {playbookglob}."
+                )
+                return None
 
             _playbook_set = [{"is_collection": False, "playbooks": playbooks}]
 
@@ -594,8 +604,16 @@ class Task:
                     + self.repo
                     + "/tests*.yml"
                 )
+                coll_playbooks = glob.glob(playbookglob)
+                if args.only_tests:
+                    coll_playbooks = [
+                        pb
+                        for pb in coll_playbooks
+                        for pat in args.only_tests
+                        if pat.search(pb)
+                    ]
                 _playbook_set.append(
-                    {"is_collection": True, "playbooks": glob.glob(playbookglob)}
+                    {"is_collection": True, "playbooks": coll_playbooks}
                 )
 
             ansible_log = f"{artifactsdir}/ansible.log"
@@ -1414,6 +1432,12 @@ def main():
             "parameter to run all tests, and report failure at the end."
         ),
     )
+    parser.add_argument(
+        "--only-tests",
+        default=os.environ.get("TEST_HARNESS_ONLY_TESTS"),
+        action="store_true",
+        help=("Only run test playbooks that match these space separated patterns."),
+    )
 
     args = parser.parse_args()
 
@@ -1443,6 +1467,8 @@ def main():
 
         global lsr_r2c_module
         lsr_r2c_module = import_module("lsr_role2collection")
+    if args.only_tests:
+        args.only_tests = [re.compile(pat) for pat in args.only_tests.split(" ")]
     setup_logging(config.get("logging", {}), args)
 
     check_environment(args)
