@@ -16,7 +16,7 @@ RUN dnf update --enablerepo=epel -y && dnf install --enablerepo=epel -y \
     python3 -mpip install netaddr
 
 RUN curl -s -o /usr/share/ansible/inventory/standard-inventory-qcow2 \
-    https://pagure.io/fork/rmeggins/standard-test-roles/raw/use-device-q-to-find-devices/f/inventory/standard-inventory-qcow2
+    https://pagure.io/fork/rmeggins/standard-test-roles/raw/linux-system-roles/f/inventory/standard-inventory-qcow2
 # change it to use python 3.6
 RUN sed -i 's,/usr/bin/python3$,/usr/bin/python3.6,' /usr/share/ansible/inventory/standard-inventory-qcow2
 
