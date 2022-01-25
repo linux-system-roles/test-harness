@@ -69,8 +69,8 @@
         __test_harness_imgstream_name: linux-system-roles-a212
         __test_harness_cm_name: config
         __test_harness_cm_file: config.json
-        __test_harness_dc: linux-system-roles-212
-        __test_harness_bc: linux-system-roles-212
+        __test_harness_dc: linux-system-roles-a212
+        __test_harness_bc: linux-system-roles-a212
         __test_harness_secret_name: secrets
         __test_harness_ghtoken_file: github-token
         __test_harness_deploy_replicas: "{{ test_harness_deploy_replicas | d(8) }}"
