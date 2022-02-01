@@ -24,6 +24,9 @@ RUN if [ ! -d /usr/share/ansible/inventory ]; then \
 	sed -i -e 's,^#!/usr/bin/python3,#!/usr/bin/python2,' \
 	  /usr/share/ansible/inventory/standard-inventory-qcow2
 
+RUN curl -s -L -o /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.5/dumb-init_1.2.5_x86_64
+RUN chmod +x /usr/local/bin/dumb-init
+
 COPY test /test
 # for role2collection support
 RUN curl -s -o /test/lsr_role2collection.py \
@@ -36,5 +39,7 @@ ENV COLLECTION_SRC_OWNER=linux-system-roles COLLECTION_META_RUNTIME=/test/runtim
     TEST_HARNESS_SKIP_TAGS=tests::cleanup,tests::nvme TEST_SKIP_MISSING_DEVICE=true
 
 VOLUME /config /secrets /cache
+
+ENTRYPOINT ["/usr/local/bin/dumb-init", "--"]
 
 CMD ["scl", "enable", "rh-git227", "/test/run-tests"]
