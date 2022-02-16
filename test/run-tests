@@ -622,6 +622,15 @@ class Task:
             else:
                 output_log = ansible_log
             for pset in _playbook_set:
+                src_filter_plugin_path = os.path.join(sourcedir, "filter_plugins")
+                dest_filter_plugin_path = os.path.join(sourcedir, "hide_filter_plugins")
+                if pset["is_collection"]:
+                    # somehow ansible is picking up this path and using the filter
+                    # plugin from this directory when running the collection tests
+                    # so remove this directory for the collection tests
+                    if os.path.isdir(src_filter_plugin_path):
+                        os.rename(src_filter_plugin_path, dest_filter_plugin_path)
+
                 for playbook in sorted(pset["playbooks"]):
                     print(f"Testing {playbook}...", end="")
                     with redirect_output(output_log, mode="a"):
@@ -682,10 +691,11 @@ class Task:
                                 testenv["ANSIBLE_COLLECTIONS_PATHS"] = collection_paths
                             logging.debug(
                                 "Running playbook env [%s] directory [%s] "
-                                "is present [%s]",
+                                "is present [%s] cwd [%s]",
                                 str(testenv),
                                 collection_dest_path,
                                 str(os.path.isdir(collection_dest_path)),
+                                os.path.dirname(playbook),
                             )
                             verbosity = "-vv"
                             if args.debug:
@@ -758,6 +768,9 @@ class Task:
                         if need_collections_paths and not args.keep_results:
                             cleanup_collection_tempdirs(remove_script=False)
                         return run_status
+                if pset["is_collection"]:
+                    if os.path.isdir(dest_filter_plugin_path):
+                        os.rename(dest_filter_plugin_path, src_filter_plugin_path)
             if need_collections_paths and not args.keep_results:
                 cleanup_collection_tempdirs(remove_script=False)
             if run_status:

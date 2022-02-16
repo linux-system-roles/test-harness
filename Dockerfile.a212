@@ -12,8 +12,7 @@ RUN dnf update --enablerepo=epel -y && dnf install --enablerepo=epel -y \
     standard-test-roles && \
     rpm -e --nodeps ansible && \
     dnf clean all && \
-    python3.6 -mpip install cachecontrol && \
-    python3 -mpip install netaddr
+    python3.6 -mpip install cachecontrol
 
 RUN curl -s -o /usr/share/ansible/inventory/standard-inventory-qcow2 \
     https://pagure.io/fork/rmeggins/standard-test-roles/raw/linux-system-roles/f/inventory/standard-inventory-qcow2

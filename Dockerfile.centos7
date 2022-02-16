@@ -1,6 +1,6 @@
 FROM quay.io/centos/centos:centos7
 
-RUN yum update -y && PKGS="centos-release-ansible-29 python-netaddr centos-release-scl-rh" && \
+RUN yum update -y && PKGS="centos-release-ansible-29 centos-release-scl-rh" && \
     yum install -y $PKGS && rpm -V $PKGS && \
     PKGS="ansible epel-release rsync" && yum install -y $PKGS && rpm -V $PKGS && \
     PKGS="rh-git218 python3-pip standard-test-roles seabios-bin" && \
