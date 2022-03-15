@@ -21,7 +21,7 @@ RUN if [ ! -d /usr/share/ansible/inventory ]; then \
     curl -s -o /usr/share/ansible/inventory/standard-inventory-qcow2 \
         https://pagure.io/fork/rmeggins/standard-test-roles/raw/linux-system-roles/f/inventory/standard-inventory-qcow2 && \
     chmod +x /usr/share/ansible/inventory/standard-inventory-qcow2 && \
-	sed -i -e 's,^#!/usr/bin/python3,#!/usr/bin/python2,' \
+	sed -i -e 's,^#!/usr/bin/python3.*$,#!/usr/bin/python2,' \
 	  /usr/share/ansible/inventory/standard-inventory-qcow2
 
 RUN curl -s -L -o /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.5/dumb-init_1.2.5_x86_64
@@ -33,9 +33,12 @@ RUN curl -s -o /test/lsr_role2collection.py \
     https://raw.githubusercontent.com/linux-system-roles/auto-maintenance/master/lsr_role2collection.py
 RUN curl -s -o /test/runtime.yml \
     https://raw.githubusercontent.com/linux-system-roles/auto-maintenance/master/lsr_role2collection/runtime.yml
+RUN curl -s -o /test/runqemu.py \
+    https://raw.githubusercontent.com/linux-system-roles/tox-lsr/main/src/tox_lsr/test_scripts/runqemu.py
 
 ENV COLLECTION_SRC_OWNER=linux-system-roles COLLECTION_META_RUNTIME=/test/runtime.yml \
     ANSIBLE_STDOUT_CALLBACK=debug ANSIBLE_CALLBACK_WHITELIST=profile_tasks \
+    TEST_HARNESS_USE_YUM_CACHE=true TEST_HARNESS_USE_SNAPSHOT=true \
     TEST_HARNESS_SKIP_TAGS=tests::cleanup,tests::nvme TEST_SKIP_MISSING_DEVICE=true
 
 VOLUME /config /secrets /cache

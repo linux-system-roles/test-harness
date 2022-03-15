@@ -28,12 +28,12 @@ import urllib.request
 import requests
 import cachecontrol
 import cachecontrol.heuristics
-import yaml
+
+import runqemu
 
 # this is what Ansible uses for version comparison
 # use LooseVersion to handle alphas, betas, other pre-release versions
 from distutils.version import LooseVersion
-from distutils.util import strtobool
 from checkmeta import role_supported
 from compose2image import composeurl2images
 
@@ -142,6 +142,22 @@ def handle_transient_httperrors(error):
         return False
 
     return True
+
+
+def strtobool(val):
+    """Convert a string representation of truth to true (1) or false (0).
+
+    True values are 'y', 'yes', 't', 'true', 'on', and '1'; false values
+    are 'n', 'no', 'f', 'false', 'off', and '0'.  Raises ValueError if
+    'val' is anything else.
+    """
+    val = val.lower()
+    if val in ("y", "yes", "t", "true", "on", "1"):
+        return 1
+    elif val in ("n", "no", "f", "false", "off", "0"):
+        return 0
+    else:
+        raise ValueError("invalid truth value %r" % (val,))
 
 
 class Session(requests.Session):
@@ -463,14 +479,6 @@ class Task:
         tests succeeded.
         """
 
-        if args.backend == KVM_BACKEND:
-            image_url = self.get_url()
-            if not image_url:
-                return None
-            image_path = fetch_image(image_url, args.cache, self.image["name"])
-            if not image_path:
-                return None
-
         run_status = True
         with checkout_repository(self.owner, self.repo, self.refspec) as sourcedir:
             # If args.collections is true, converts the role to the collections format.
@@ -496,76 +504,6 @@ class Task:
                 finally:
                     logging.getLogger().setLevel(save_level)
                 need_collections_paths = True
-
-            # Install runtime requirements if there are any.
-            requirements_file = os.path.join(sourcedir, "meta", "requirements.yml")
-            if os.path.exists(requirements_file):
-                run(
-                    "ansible-galaxy",
-                    "collection",
-                    "install",
-                    "-vv",
-                    "-p",
-                    collection_dest_path,
-                    "-r",
-                    requirements_file,
-                )
-                need_collections_paths = True
-                os.environ["COLLECTION_DEST_PATH"] = collection_dest_path
-
-            if need_collections_paths:
-                collection_paths = (
-                    collection_dest_path
-                    + ":~/.ansible/collections:/usr/share/ansible/collections"
-                )
-
-            # Generate a playbook with a single raw task to setup the image
-            # (this usually means installing python2 on the guest for ansible)
-            setup_file = os.path.join(sourcedir, "_setup.yml")
-
-            # Playbook to fail when only localhost is available. This happens
-            # when the inventory script fails. Then ansible-playbook would just
-            # skip the tests with this warnings:
-            #
-            # [WARNING]: Unable to parse
-            # /usr/share/ansible/inventory/standard-inventory-qcow2 as an
-            # inventory source
-            # [WARNING]: No inventory was parsed, only implicit localhost is
-            # available
-            # [WARNING]: provided hosts list is empty, only localhost is
-            # available. Note that the implicit localhost does not match 'all'
-            # [...]
-            # skipping: no hosts matched
-            inventory_fail_msg = "ERROR: Inventory is empty, tests did not run"
-            fail_localhost = {
-                "name": "Fail when only localhost is available",
-                "hosts": "localhost",
-                "gather_facts": False,
-                "tasks": [
-                    {"debug": {"var": "groups"}},
-                    {
-                        "fail": {"msg": inventory_fail_msg},
-                        "when": ['groups["all"] == []'],
-                    },
-                ],
-            }
-
-            setup_plays = [fail_localhost]
-            if "setup" in self.image:
-                if isinstance(self.image["setup"], str):
-                    play = {
-                        "name": "Setup",
-                        "hosts": "all",
-                        "become": True,
-                        "gather_facts": False,
-                        "tasks": [{"raw": self.image["setup"]}],
-                    }
-                    setup_plays.append(play)
-                else:
-                    setup_plays.extend(self.image["setup"])
-
-            with open(setup_file, "w") as outfile:
-                yaml.dump(setup_plays, outfile)
 
             # Fedora's standard test invocation spec mandates running all
             # playbooks matching `tests/tests*.yml`, but linux-system-roles
@@ -633,9 +571,8 @@ class Task:
 
                 for playbook in sorted(pset["playbooks"]):
                     print(f"Testing {playbook}...", end="")
+                    test_passed = False
                     with redirect_output(output_log, mode="a"):
-                        testenv = self.image.get("env", {})
-
                         # Use the qcow2 inventory from standard-test-roles, which
                         # boots a transient VM and runs the playbook against that.
                         # Create a fresh instance for each test playbook. However,
@@ -643,12 +580,11 @@ class Task:
                         # invocation of ansible-playbook, so that that it applies
                         # to the same VM as the test playbook.
                         if args.backend == CITOOL_BACKEND:
+                            testenv = self.image.get("env", {})
                             if need_collections_paths or pset["is_collection"]:
-                                testenv.update(
-                                    {
-                                        "ANSIBLE_COLLECTIONS_PATHS": collection_paths,
-                                    }
-                                )
+                                envname = "ANSIBLE_COLLECTIONS_PATHS"
+                                testenv[envname] = collection_dest_path
+                            setup_file = self.image["setup"]
                             result = run(
                                 CITOOL_COMMAND,
                                 "-o",
@@ -657,7 +593,7 @@ class Task:
                                 "rules-engine",
                                 "guest-setup",
                                 "--playbooks",
-                                setup_file,
+                                setup_file,  # revisit this if we ever support citool
                                 "guess-environment",
                                 "--image-method=force",
                                 "--image",
@@ -680,38 +616,42 @@ class Task:
                                 check=False,
                                 cwd=os.path.dirname(playbook),
                             )
+                            if result.resultcode == 0:
+                                test_passed = True
                         elif args.backend == KVM_BACKEND:
-                            testenv.update(
-                                {
-                                    "TEST_SUBJECTS": image_path,
-                                    "TEST_ARTIFACTS": artifactsdir,
-                                }
-                            )
-                            if need_collections_paths or pset["is_collection"]:
-                                testenv["ANSIBLE_COLLECTIONS_PATHS"] = collection_paths
                             logging.debug(
-                                "Running playbook env [%s] directory [%s] "
+                                "Running playbook [%s] directory [%s] "
                                 "is present [%s] cwd [%s]",
-                                str(testenv),
+                                playbook,
                                 collection_dest_path,
                                 str(os.path.isdir(collection_dest_path)),
                                 os.path.dirname(playbook),
                             )
-                            verbosity = "-vv"
+                            ansible_args = [f"--skip-tags={args.skip_tags}"]
                             if args.debug:
-                                verbosity = "-vvv"
-                            result = run(
-                                "ansible-playbook",
-                                verbosity,
-                                f"--inventory={args.inventory}",
-                                f"--skip-tags={args.skip_tags}",
-                                setup_file,
-                                playbook,
-                                env=testenv,
-                                check=False,
-                                cwd=os.path.dirname(playbook),
-                            )
-
+                                ansible_args.append("-vv")
+                            ansible_args.extend(["--", playbook])
+                            try:
+                                runqemu.runqemu(
+                                    self.image,
+                                    args.cache,
+                                    args.inventory,
+                                    ansible_args=ansible_args,
+                                    collection_path=collection_dest_path,
+                                    pretty=False,
+                                    profile=False,
+                                    sourcedir=sourcedir,
+                                    artifacts=artifactsdir,
+                                    use_snapshot=args.use_snapshot,
+                                    remove_cloud_init=args.remove_cloud_init,
+                                    use_yum_cache=args.use_yum_cache,
+                                    wait_on_qemu=True,
+                                )
+                                test_passed = True
+                            except Exception as exc:
+                                logging.error(
+                                    "Test %s failed with %s", playbook, str(exc)
+                                )
                         else:
                             assert False, "unreachable"
 
@@ -750,11 +690,11 @@ class Task:
                             print("FAILURE")
                             return False
 
-                    if result.returncode != 0:
+                    if not test_passed:
                         run_status = False
                         with open(ansible_log, "r") as ansible_file:
                             for line in ansible_file:
-                                if inventory_fail_msg in line:
+                                if runqemu.INVENTORY_FAIL_MSG in line:
                                     print("ERROR: Inventory not properly set up")
                                     run_status = None
 
@@ -805,11 +745,11 @@ def pull_ok_to_test(gh, owner, repo, pull, author, head, title):
     # [citest commit:<commit-hash>]
     # to allow to check this commit
     comments = get_comments(gh, owner, repo, pull)
-    whitelist_command = f"[citest commit:{head}]"
+    allow_command = f"[citest commit:{head}]"
     for comment in comments:
         if comment["author_association"] == "MEMBER":
-            if whitelist_command in comment["body"]:
-                logging.debug("PR is ok to test - whitelisted by member")
+            if allow_command in comment["body"]:
+                logging.debug("PR is ok to test - allowed by member")
                 return True
 
     result = gh.get(f"repos/{owner}/{repo}/issues/{pull}/labels")
@@ -1448,8 +1388,27 @@ def main():
     parser.add_argument(
         "--only-tests",
         default=os.environ.get("TEST_HARNESS_ONLY_TESTS"),
-        action="store_true",
         help=("Only run test playbooks that match these space separated patterns."),
+    )
+    parser.add_argument(
+        "--remove-cloud-init",
+        default=bool(
+            strtobool(os.environ.get("TEST_HARNESS_REMOVE_CLOUD_INIT", "False"))
+        ),
+        action="store_true",
+        help=("Remove cloud-init from the image first."),
+    )
+    parser.add_argument(
+        "--use-yum-cache",
+        default=bool(strtobool(os.environ.get("TEST_HARNESS_USE_YUM_CACHE", "False"))),
+        action="store_true",
+        help=("Use a YUM/DNF RPM package cache."),
+    )
+    parser.add_argument(
+        "--use-snapshot",
+        default=bool(strtobool(os.environ.get("TEST_HARNESS_USE_SNAPSHOT", "False"))),
+        action="store_true",
+        help=("Prepare and use an image snapshot."),
     )
 
     args = parser.parse_args()
