@@ -38,7 +38,6 @@ RUN curl -s -o /test/runqemu.py \
 
 ENV COLLECTION_SRC_OWNER=linux-system-roles COLLECTION_META_RUNTIME=/test/runtime.yml \
     ANSIBLE_STDOUT_CALLBACK=debug ANSIBLE_CALLBACK_WHITELIST=profile_tasks \
-    TEST_HARNESS_USE_YUM_CACHE=true TEST_HARNESS_USE_SNAPSHOT=true \
     TEST_HARNESS_SKIP_TAGS=tests::cleanup,tests::nvme TEST_SKIP_MISSING_DEVICE=true
 
 VOLUME /config /secrets /cache
