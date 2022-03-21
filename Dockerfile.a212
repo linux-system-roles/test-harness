@@ -1,7 +1,5 @@
 FROM registry.fedoraproject.org/fedora:34
 
-USER 0
-
 # standard-test-roles pulls in ansible - remove it and install ansible-core
 RUN dnf update -y && PKGS="dumb-init \
     qemu-img \

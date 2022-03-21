@@ -480,6 +480,7 @@ class Task:
         """
 
         run_status = True
+        erase_old_snapshot = True  # erase first time through loop
         with checkout_repository(self.owner, self.repo, self.refspec) as sourcedir:
             # If args.collections is true, converts the role to the collections format.
             collection_dest_path = tempfile.TemporaryDirectory().name
@@ -533,15 +534,16 @@ class Task:
                 )
                 return None
 
+            setup_yml = None
+            if args.use_snapshot:
+                setup_snapshot = os.path.join(sourcedir, "tests", "setup-snapshot.yml")
+                if os.path.exists(setup_snapshot):
+                    setup_yml = [setup_snapshot]
             _playbook_set = [{"is_collection": False, "playbooks": playbooks}]
 
             if args.collections:
-                playbookglob = (
-                    os.environ["COLLECTION_TESTS_DEST_PATH"]
-                    + "/tests/"
-                    + self.repo
-                    + "/tests*.yml"
-                )
+                tests_path = os.path.join(os.environ["COLLECTION_TESTS_DEST_PATH"], "tests", self.repo)
+                playbookglob = tests_path + "/tests*.yml"
                 coll_playbooks = glob.glob(playbookglob)
                 if args.only_tests:
                     coll_playbooks = [
@@ -553,6 +555,10 @@ class Task:
                 _playbook_set.append(
                     {"is_collection": True, "playbooks": coll_playbooks}
                 )
+                if args.use_snapshot and not setup_yml:
+                    setup_snapshot = os.path.join(tests_path, "setup-snapshot.yml")
+                    if os.path.exists(setup_snapshot):
+                        setup_yml = [setup_snapshot]
 
             ansible_log = f"{artifactsdir}/ansible.log"
             if args.backend == CITOOL_BACKEND:
@@ -646,12 +652,15 @@ class Task:
                                     remove_cloud_init=args.remove_cloud_init,
                                     use_yum_cache=args.use_yum_cache,
                                     wait_on_qemu=True,
+                                    setup_yml=setup_yml,
+                                    erase_old_snapshot=erase_old_snapshot,
                                 )
                                 test_passed = True
                             except Exception as exc:
-                                logging.error(
+                                logging.debug(
                                     "Test %s failed with %s", playbook, str(exc)
                                 )
+                            erase_old_snapshot = False  # only erase first time through loop
                         else:
                             assert False, "unreachable"
 
