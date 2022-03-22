@@ -654,6 +654,7 @@ class Task:
                                     wait_on_qemu=True,
                                     setup_yml=setup_yml,
                                     erase_old_snapshot=erase_old_snapshot,
+                                    post_snap_sleep_time=args.post_snap_sleep_time,
                                 )
                                 test_passed = True
                             except Exception as exc:
@@ -1418,6 +1419,12 @@ def main():
         default=bool(strtobool(os.environ.get("TEST_HARNESS_USE_SNAPSHOT", "False"))),
         action="store_true",
         help=("Prepare and use an image snapshot."),
+    )
+    parser.add_argument(
+        "--post-snap-sleep-time",
+        type=int,
+        default=int(os.environ.get("TEST_HARNESS_POST_SNAP_SLEEP_TIME", "30")),
+        help=("Time to sleep post snap creation."),
     )
 
     args = parser.parse_args()
