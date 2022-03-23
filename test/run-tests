@@ -637,6 +637,28 @@ class Task:
                             if args.debug:
                                 ansible_args.append("-vv")
                             ansible_args.extend(["--", playbook])
+                            fmtstr = (
+                                "Calling runqemu with image %s cache %s inventory %s args %s "
+                                "collection_path %s sourcedir %s artifacts %s use_snapshot %s "
+                                "remove_cloud_init %s use_yum_cache %s setup_yml %s "
+                                "erase_old_snapshot %s post_snap_sleep_time %s"
+                            )
+                            logging.debug(
+                                fmtstr,
+                                self.image,
+                                args.cache,
+                                args.inventory,
+                                ansible_args,
+                                collection_dest_path,
+                                sourcedir,
+                                artifactsdir,
+                                args.use_snapshot,
+                                args.remove_cloud_init,
+                                args.use_yum_cache,
+                                setup_yml,
+                                erase_old_snapshot,
+                                args.post_snap_sleep_time,
+                            )
                             try:
                                 runqemu.runqemu(
                                     self.image,
