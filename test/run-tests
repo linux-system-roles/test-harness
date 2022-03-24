@@ -637,6 +637,23 @@ class Task:
                             if args.debug:
                                 ansible_args.append("-vv")
                             ansible_args.extend(["--", playbook])
+                            runqemu_kwargs = dict(
+                                ansible_args=ansible_args,
+                                collection_path=collection_dest_path,
+                                pretty=False,
+                                profile=False,
+                                sourcedir=sourcedir,
+                                artifacts=artifactsdir,
+                                use_snapshot=args.use_snapshot,
+                                remove_cloud_init=args.remove_cloud_init,
+                                use_yum_cache=args.use_yum_cache,
+                                wait_on_qemu=True,
+                                setup_yml=setup_yml,
+                                erase_old_snapshot=erase_old_snapshot,
+                                post_snap_sleep_time=args.post_snap_sleep_time,
+                            )
+                            if "runqemu_args" in self.image:
+                                runqemu_kwargs.update(self.image["runqemu_args"])
                             fmtstr = (
                                 "Calling runqemu with image %s cache %s inventory %s args %s "
                                 "collection_path %s sourcedir %s artifacts %s use_snapshot %s "
@@ -648,35 +665,14 @@ class Task:
                                 self.image,
                                 args.cache,
                                 args.inventory,
-                                ansible_args,
-                                collection_dest_path,
-                                sourcedir,
-                                artifactsdir,
-                                args.use_snapshot,
-                                args.remove_cloud_init,
-                                args.use_yum_cache,
-                                setup_yml,
-                                erase_old_snapshot,
-                                args.post_snap_sleep_time,
+                                *runqemu_kwargs.values(),
                             )
                             try:
                                 runqemu.runqemu(
                                     self.image,
                                     args.cache,
                                     args.inventory,
-                                    ansible_args=ansible_args,
-                                    collection_path=collection_dest_path,
-                                    pretty=False,
-                                    profile=False,
-                                    sourcedir=sourcedir,
-                                    artifacts=artifactsdir,
-                                    use_snapshot=args.use_snapshot,
-                                    remove_cloud_init=args.remove_cloud_init,
-                                    use_yum_cache=args.use_yum_cache,
-                                    wait_on_qemu=True,
-                                    setup_yml=setup_yml,
-                                    erase_old_snapshot=erase_old_snapshot,
-                                    post_snap_sleep_time=args.post_snap_sleep_time,
+                                    **runqemu_kwargs,
                                 )
                                 test_passed = True
                             except Exception as exc:
