@@ -542,7 +542,9 @@ class Task:
             _playbook_set = [{"is_collection": False, "playbooks": playbooks}]
 
             if args.collections:
-                tests_path = os.path.join(os.environ["COLLECTION_TESTS_DEST_PATH"], "tests", self.repo)
+                tests_path = os.path.join(
+                    os.environ["COLLECTION_TESTS_DEST_PATH"], "tests", self.repo
+                )
                 playbookglob = tests_path + "/tests*.yml"
                 coll_playbooks = glob.glob(playbookglob)
                 if args.only_tests:
@@ -655,10 +657,11 @@ class Task:
                             if "runqemu_args" in self.image:
                                 runqemu_kwargs.update(self.image["runqemu_args"])
                             fmtstr = (
-                                "Calling runqemu with image %s cache %s inventory %s args %s "
-                                "collection_path %s sourcedir %s artifacts %s use_snapshot %s "
-                                "remove_cloud_init %s use_yum_cache %s setup_yml %s "
-                                "erase_old_snapshot %s post_snap_sleep_time %s"
+                                "Calling runqemu with image %s cache %s inventory %s "
+                                "args %s collection_path %s sourcedir %s artifacts "
+                                "%s use_snapshot %s remove_cloud_init %s "
+                                "use_yum_cache %s setup_yml %s erase_old_snapshot %s "
+                                "post_snap_sleep_time %s"
                             )
                             logging.debug(
                                 fmtstr,
@@ -679,7 +682,9 @@ class Task:
                                 logging.debug(
                                     "Test %s failed with %s", playbook, str(exc)
                                 )
-                            erase_old_snapshot = False  # only erase first time through loop
+                            erase_old_snapshot = (
+                                False  # only erase first time through loop
+                            )
                         else:
                             assert False, "unreachable"
 
