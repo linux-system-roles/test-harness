@@ -2,14 +2,15 @@
 """Test Harness for Linux System Roles"""
 
 import argparse
+import calendar
 import datetime
+import errno
 import fnmatch
 import glob
 import html
 import json
 import logging
 import os
-import errno
 import random
 import re
 import signal
@@ -20,7 +21,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import calendar
 import traceback
 import urllib.parse
 import urllib.request
@@ -53,6 +53,12 @@ URL_XATTR = "user.xdg.origin.url"
 DATE_XATTR = "user.dublincore.date"
 
 GITHUB_MAX_PAGE_SIZE = 100
+
+ROLE_MODIFIED_FILES = {
+    "network": ["/etc/resolv.conf"],
+}
+
+NO_BATCH = ["vpn"]
 
 
 class TransientErrorWaitTime:
@@ -467,6 +473,115 @@ class Task:
             )
             return None
 
+    def _playbook_for_backup_restore(self, role, files, backup, restore):
+        """
+        Generate a backup and a restore playbook to reset the system
+        files which are possibly modified in a test and affect the
+        following tests.
+        """
+        _str = """- hosts: all
+  gather_facts: no
+  vars:
+    _existing_files: ""
+  tasks:
+    - name: "Get stats of system files"
+      stat:
+        path: "{{ item }}"
+      register: _results
+      loop:"""
+        for file in files:
+            _str = "{}\n        - {}".format(_str, file)
+
+        _str1 = """    - name: "Check if system files exist"
+      set_fact:
+        _existing_files: "{{{{ _existing_files }}}} {{{{ item.stat.path }}}}"
+      loop: "{{{{ _results.results }}}}"
+      when: "{{{{ item.stat.exists }}}}"
+
+    - name: "Back up system files"
+      command: >-
+        tar -cf /tmp/{}.backup.tar --same-owner --same-permissions 
+        {{{{ _existing_files }}}}""".format(  # noqa
+            role
+        )
+
+        _str = "{}\n\n{}".format(_str, _str1)
+        with open(backup, "w") as f:
+            f.write(_str)
+
+        _str = """- hosts: all
+  gather_facts: no
+  tasks:
+    - name: "Restore system files"
+      shell: |-
+        (cd /; tar -xf /tmp/{}.backup.tar)""".format(
+            role
+        )
+
+        with open(restore, "w") as f:
+            f.write(_str)
+
+    def _gen_batch_file(
+        self,
+        role,
+        playbooks,
+        collection_dest_path,
+        erase_old_snapshot,
+        sourcedir,
+    ):
+        """
+        Generate a batch file to pass to runqemu with the --batch-file
+        option.
+        """
+        test_dir = os.path.dirname(playbooks[0])
+        if role in ROLE_MODIFIED_FILES:
+            self._playbook_for_backup_restore(
+                role,
+                ROLE_MODIFIED_FILES[role],
+                "{}/_backup.yml".format(test_dir),
+                "{}/_restore.yml".format(test_dir),
+            )
+            pre_playbooks = "{}/_backup.yml".format(test_dir)
+            post_playbooks = "{}/_restore.yml".format(test_dir)
+        else:
+            pre_playbooks = ""
+            post_playbooks = ""
+
+        # batch_file = "{}/{}_batch.txt".format(sourcedir, role)
+        batch_file = "{}_batch.txt".format(role)
+        with open(batch_file, "w") as batchf:
+            for playbook in playbooks:
+                line = "--tests-dir {} {} -- {} {} {}\n".format(
+                    test_dir,
+                    "--erase-old-snapshot" if erase_old_snapshot else "",
+                    pre_playbooks,
+                    playbook,
+                    post_playbooks,
+                )
+                logging.debug("batch_file: %s", line)
+                batchf.write(line)
+                erase_old_snapshot = False
+        return batch_file
+
+    def _print_test_result(self, test_passed, ansible_log, artifactsdir):
+        """
+        Prints the test result based on the test_passed argument.
+        Shared between CITOOL_BACKEND and KVM_BACKEND.
+        """
+        run_status = True
+        if not test_passed:
+            run_status = False
+            with open(ansible_log, "r") as ansible_file:
+                for line in ansible_file:
+                    if runqemu.INVENTORY_FAIL_MSG in line:
+                        print("ERROR: Inventory not properly set up")
+                        run_status = None
+            print("FAILURE")
+            logging.debug(f"test failed for {artifactsdir}")
+        else:
+            print("SUCCESS")
+        return run_status
+
     def run(
         self,
         artifactsdir,
@@ -479,7 +594,6 @@ class Task:
         tests succeeded.
         """
 
-        run_status = True
         erase_old_snapshot = True  # erase first time through loop
         with checkout_repository(self.owner, self.repo, self.refspec) as sourcedir:
             # If args.collections is true, converts the role to the collections format.
@@ -534,11 +648,11 @@ class Task:
                 )
                 return None
 
-            setup_yml = None
+            setup_snapshot = None
             if args.use_snapshot:
                 setup_snapshot = os.path.join(sourcedir, "tests", "setup-snapshot.yml")
-                if os.path.exists(setup_snapshot):
-                    setup_yml = [setup_snapshot]
+                if not os.path.exists(setup_snapshot):
+                    setup_snapshot = None
             _playbook_set = [{"is_collection": False, "playbooks": playbooks}]
 
             if args.collections:
@@ -557,16 +671,19 @@ class Task:
                 _playbook_set.append(
                     {"is_collection": True, "playbooks": coll_playbooks}
                 )
-                if args.use_snapshot and not setup_yml:
+                if args.use_snapshot and not setup_snapshot:
                     setup_snapshot = os.path.join(tests_path, "setup-snapshot.yml")
-                    if os.path.exists(setup_snapshot):
-                        setup_yml = [setup_snapshot]
+                    if not os.path.exists(setup_snapshot):
+                        setup_snapshot = None
 
             ansible_log = f"{artifactsdir}/ansible.log"
             if args.backend == CITOOL_BACKEND:
                 output_log = f"{private_artifactsdir}/citool.log"
-            else:
+            elif args.backend == KVM_BACKEND:
                 output_log = ansible_log
+            else:
+                assert False, "unreachable"
+
             for pset in _playbook_set:
                 src_filter_plugin_path = os.path.join(sourcedir, "filter_plugins")
                 dest_filter_plugin_path = os.path.join(sourcedir, "hide_filter_plugins")
@@ -577,17 +694,18 @@ class Task:
                     if os.path.isdir(src_filter_plugin_path):
                         os.rename(src_filter_plugin_path, dest_filter_plugin_path)
 
-                for playbook in sorted(pset["playbooks"]):
-                    print(f"Testing {playbook}...", end="")
-                    test_passed = False
-                    with redirect_output(output_log, mode="a"):
-                        # Use the qcow2 inventory from standard-test-roles, which
-                        # boots a transient VM and runs the playbook against that.
-                        # Create a fresh instance for each test playbook. However,
-                        # we do need to run the setup (if it exists) in the same
-                        # invocation of ansible-playbook, so that that it applies
-                        # to the same VM as the test playbook.
-                        if args.backend == CITOOL_BACKEND:
+                if args.backend == CITOOL_BACKEND:
+                    for playbook in sorted(pset["playbooks"]):
+                        print(f"Testing {playbook}...", end="")
+                        test_passed = False
+                        with redirect_output(output_log, mode="a"):
+                            # Use the qcow2 inventory from standard-test-roles, which
+                            # boots a transient VM and runs the playbook against that.
+                            # Create a fresh instance for each test playbook. However,
+                            # we do need to run the setup (if it exists) in the same
+                            # invocation of ansible-playbook, so that that it applies
+                            # to the same VM as the test playbook.
+
                             testenv = self.image.get("env", {})
                             if need_collections_paths or pset["is_collection"]:
                                 envname = "ANSIBLE_COLLECTIONS_PATHS"
@@ -626,69 +744,7 @@ class Task:
                             )
                             if result.resultcode == 0:
                                 test_passed = True
-                        elif args.backend == KVM_BACKEND:
-                            logging.debug(
-                                "Running playbook [%s] directory [%s] "
-                                "is present [%s] cwd [%s]",
-                                playbook,
-                                collection_dest_path,
-                                str(os.path.isdir(collection_dest_path)),
-                                os.path.dirname(playbook),
-                            )
-                            ansible_args = [f"--skip-tags={args.skip_tags}"]
-                            if args.debug:
-                                ansible_args.append("-vv")
-                            ansible_args.extend(["--", playbook])
-                            runqemu_kwargs = dict(
-                                ansible_args=ansible_args,
-                                collection_path=collection_dest_path,
-                                pretty=False,
-                                profile=False,
-                                sourcedir=sourcedir,
-                                artifacts=artifactsdir,
-                                use_snapshot=args.use_snapshot,
-                                remove_cloud_init=args.remove_cloud_init,
-                                use_yum_cache=args.use_yum_cache,
-                                wait_on_qemu=True,
-                                setup_yml=setup_yml,
-                                erase_old_snapshot=erase_old_snapshot,
-                                post_snap_sleep_time=args.post_snap_sleep_time,
-                            )
-                            if "runqemu_args" in self.image:
-                                runqemu_kwargs.update(self.image["runqemu_args"])
-                            fmtstr = (
-                                "Calling runqemu with image %s cache %s inventory %s "
-                                "args %s collection_path %s sourcedir %s artifacts "
-                                "%s use_snapshot %s remove_cloud_init %s "
-                                "use_yum_cache %s setup_yml %s erase_old_snapshot %s "
-                                "post_snap_sleep_time %s"
-                            )
-                            logging.debug(
-                                fmtstr,
-                                self.image,
-                                args.cache,
-                                args.inventory,
-                                *runqemu_kwargs.values(),
-                            )
-                            try:
-                                runqemu.runqemu(
-                                    self.image,
-                                    args.cache,
-                                    args.inventory,
-                                    **runqemu_kwargs,
-                                )
-                                test_passed = True
-                            except Exception as exc:
-                                logging.debug(
-                                    "Test %s failed with %s", playbook, str(exc)
-                                )
-                            erase_old_snapshot = (
-                                False  # only erase first time through loop
-                            )
-                        else:
-                            assert False, "unreachable"
 
-                    if args.backend == CITOOL_BACKEND:
                         ptrn = re.compile(
                             f"{playbook}] Ansible logs are in (.+/ansible-output.txt)"
                         )
@@ -723,24 +779,205 @@ class Task:
                             print("FAILURE")
                             return False
 
-                    if not test_passed:
-                        run_status = False
-                        with open(ansible_log, "r") as ansible_file:
-                            for line in ansible_file:
-                                if runqemu.INVENTORY_FAIL_MSG in line:
-                                    print("ERROR: Inventory not properly set up")
-                                    run_status = None
-
-                        print("FAILURE")
-                        logging.debug(f"test failed for {artifactsdir}")
-                    else:
-                        print("SUCCESS")
+                    run_status = self._print_test_result(
+                        test_passed, ansible_log, artifactsdir
+                    )
                     if run_status is None or (
                         not run_status and not args.run_all_tests
                     ):
                         if need_collections_paths and not args.keep_results:
                             cleanup_collection_tempdirs(remove_script=False)
                         return run_status
+
+                if args.backend == KVM_BACKEND:
+                    test_passed = False
+
+                    with redirect_output(output_log, mode="a"):
+                        # Use the qcow2 inventory from standard-test-roles, which
+                        # boots a transient VM and runs the playbook against that.
+                        # Create a fresh instance for each test playbook. However,
+                        # we do need to run the setup (if it exists) in the same
+                        # invocation of ansible-playbook, so that that it applies
+                        # to the same VM as the test playbook.
+                        runqemu_kwargs = dict(
+                            ansible_args=None,
+                            collection_path=collection_dest_path,
+                            pretty=False,
+                            profile=False,
+                            sourcedir=sourcedir,
+                            artifacts=artifactsdir,
+                            setup_yml=[setup_snapshot]
+                            if setup_snapshot is not None
+                            else None,
+                            use_snapshot=args.use_snapshot,
+                            remove_cloud_init=args.remove_cloud_init,
+                            use_yum_cache=args.use_yum_cache,
+                            wait_on_qemu=False,
+                            erase_old_snapshot=None,
+                            post_snap_sleep_time=args.post_snap_sleep_time,
+                            batch_file=None,
+                            batch_report=None,
+                        )
+
+                        if self.repo in NO_BATCH:
+                            runqemu_kwargs["erase_old_snapshot"] = erase_old_snapshot
+                            if "runqemu_args" in self.image:
+                                runqemu_kwargs.update(self.image["runqemu_args"])
+                            for playbook in sorted(pset["playbooks"]):
+                                print(f"Testing {playbook}...", end="")
+                                test_passed = False
+                                ansible_args = [f"--skip-tags={args.skip_tags}"]
+                                if args.debug:
+                                    ansible_args.append("-vv")
+                                ansible_args.extend(["--", playbook])
+                                runqemu_kwargs["ansible_args"] = ansible_args
+                                fmtstr = (
+                                    "Calling runqemu with image %s "
+                                    "cache %s "
+                                    "inventory %s "
+                                    "args %s "
+                                    "collection_path %s "
+                                    "pretty %s "
+                                    "profile %s "
+                                    "sourcedir %s "
+                                    "artifacts %s "
+                                    "setup_yml %s "
+                                    "use_snapshot %s "
+                                    "remove_cloud_init %s "
+                                    "use_yum_cache %s "
+                                    "wait_on_qemu %s "
+                                    "erase_old_snapshot %s "
+                                    "post_snap_sleep_time %s "
+                                    "batch_file %s "
+                                    "batch_report %s"
+                                )
+                                logging.debug(
+                                    fmtstr,
+                                    self.image,
+                                    args.cache,
+                                    args.inventory,
+                                    *runqemu_kwargs.values(),
+                                )
+
+                                logging.debug(
+                                    "Running playbook [%s] directory [%s] "
+                                    "is present [%s] cwd [%s]",
+                                    playbook,
+                                    collection_dest_path,
+                                    str(os.path.isdir(collection_dest_path)),
+                                    os.path.dirname(playbook),
+                                )
+                                try:
+                                    runqemu.runqemu(
+                                        self.image,
+                                        args.cache,
+                                        args.inventory,
+                                        **runqemu_kwargs,
+                                    )
+                                    test_passed = True
+                                except Exception as exc:
+                                    logging.debug(
+                                        "Test %s failed with %s", playbook, str(exc)
+                                    )
+                                erase_old_snapshot = (
+                                    False  # only erase first time through loop
+                                )
+
+                                run_status = self._print_test_result(
+                                    test_passed, ansible_log, artifactsdir
+                                )
+                                if run_status is None or (
+                                    not run_status and not args.run_all_tests
+                                ):
+                                    if need_collections_paths and not args.keep_results:
+                                        cleanup_collection_tempdirs(remove_script=False)
+                                    return run_status
+
+                        else:
+                            ansible_args = [f"--skip-tags={args.skip_tags}"]
+                            if args.debug:
+                                ansible_args.append("-vv")
+                            ansible_args.extend(["--"])
+                            runqemu_kwargs["ansible_args"] = ansible_args
+                            batch_file = self._gen_batch_file(
+                                self.repo,
+                                sorted(pset["playbooks"]),
+                                collection_dest_path,
+                                erase_old_snapshot,
+                                sourcedir,
+                            )
+                            runqemu_kwargs["batch_file"] = batch_file
+                            batch_report = "{}.report".format(
+                                os.path.splitext(batch_file)[0]
+                            )
+                            runqemu_kwargs["batch_report"] = batch_report
+                            if "runqemu_args" in self.image:
+                                runqemu_kwargs.update(self.image["runqemu_args"])
+                            fmtstr = (
+                                "Calling runqemu with image %s "
+                                "cache %s "
+                                "inventory %s "
+                                "args %s "
+                                "collection_path %s "
+                                "pretty %s "
+                                "profile %s "
+                                "sourcedir %s "
+                                "artifacts %s "
+                                "setup_yml %s "
+                                "use_snapshot %s "
+                                "remove_cloud_init %s "
+                                "use_yum_cache %s "
+                                "wait_on_qemu %s "
+                                "erase_old_snapshot %s "
+                                "post_snap_sleep_time %s "
+                                "batch_file %s "
+                                "batch_report %s"
+                            )
+                            logging.debug(
+                                fmtstr,
+                                self.image,
+                                args.cache,
+                                args.inventory,
+                                *runqemu_kwargs.values(),
+                            )
+                            try:
+                                runqemu.runqemu(
+                                    self.image,
+                                    args.cache,
+                                    args.inventory,
+                                    **runqemu_kwargs,
+                                )
+                                test_passed = True
+                            except Exception as exc:
+                                logging.debug(
+                                    "Test %s failed with %s", self.repo, str(exc)
+                                )
+                            finally:
+                                with open(batch_report) as reports:
+                                    for report in reports:
+                                        for r in report.split():
+                                            if r.isdigit():
+                                                _result = (
+                                                    "SUCCESS" if r == "0" else "FAILURE"
+                                                )
+                                            elif not re.search(
+                                                "setup-snapshot.yml|_backup.yml|_restore.yml",  # noqa
+                                                r,
+                                            ):
+                                                _playbook = r
+                                        print(
+                                            "Testing {}...{}".format(_playbook, _result)
+                                        )
+                                run_status = self._print_test_result(
+                                    test_passed, ansible_log, artifactsdir
+                                )
+                                if run_status is None or (
+                                    not run_status and not args.run_all_tests
+                                ):
+                                    if need_collections_paths and not args.keep_results:
+                                        cleanup_collection_tempdirs(remove_script=False)
+                                    return run_status
+
                 if pset["is_collection"]:
                     if os.path.isdir(dest_filter_plugin_path):
                         os.rename(dest_filter_plugin_path, src_filter_plugin_path)
