@@ -750,6 +750,16 @@ class Task:
                 logging.debug(f"test passed for {artifactsdir}")
             else:
                 logging.debug(f"test failed for {artifactsdir}")
+            if not args.keep_snap_cache:
+                # We are currently tight on disk space in /cache
+                # remove the snap and cache files after the test by default.
+                # Revisit this if we change the implementation.
+                files_to_rm = glob.glob(os.path.join(args.cache, "*.snap"))
+                files_to_rm.extend(glob.glob(os.path.join(args.cache, "*_yum_cache")))
+                files_to_rm.extend(glob.glob(os.path.join(args.cache, "*_yum_varlib")))
+                for frm in files_to_rm:
+                    logging.debug(f"removing {frm}")
+                    os.unlink(frm)
             return run_status
 
 
@@ -1448,6 +1458,14 @@ def main():
         type=int,
         default=int(os.environ.get("TEST_HARNESS_POST_SNAP_SLEEP_TIME", "30")),
         help=("Time to sleep post snap creation."),
+    )
+    parser.add_argument(
+        "--keep-snap-cache",
+        default=bool(
+            strtobool(os.environ.get("TEST_HARNESS_KEEP_SNAP_CACHE", "False"))
+        ),
+        action="store_true",
+        help=("Keep snapshot and yum cache after test is completed."),
     )
 
     args = parser.parse_args()
