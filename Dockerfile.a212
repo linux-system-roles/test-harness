@@ -37,6 +37,7 @@ RUN ansible-galaxy collection install -vv -p /test/collections ansible.posix && 
 ENV COLLECTION_SRC_OWNER=linux-system-roles COLLECTION_META_RUNTIME=/test/runtime.yml \
     ANSIBLE_CALLBACK_PLUGINS=/test/callback_plugins ANSIBLE_CALLBACKS_ENABLED=profile_tasks \
     TEST_HARNESS_USE_YUM_CACHE=true TEST_HARNESS_USE_SNAPSHOT=true \
+    TEST_HARNESS_SKIP_TAGS=tests::infiniband \
     ANSIBLE_STDOUT_CALLBACK=debug
 
 VOLUME /config /secrets /cache
