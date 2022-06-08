@@ -683,21 +683,7 @@ class Task:
                 "Calling runqemu with image %s "
                 "cache %s "
                 "inventory %s "
-                "args %s "
-                "collection_path %s "
-                "pretty %s "
-                "profile %s "
-                "sourcedir %s "
-                "artifacts %s "
-                "setup_yml %s "
-                "use_snapshot %s "
-                "remove_cloud_init %s "
-                "use_yum_cache %s "
-                "wait_on_qemu %s "
-                "erase_old_snapshot %s "
-                "post_snap_sleep_time %s "
-                "batch_file %s "
-                "batch_report %s"
+                "runqemu_args %s"
             )
             for pset in _playbook_set:
                 src_filter_plugin_path = os.path.join(sourcedir, "filter_plugins")
@@ -769,7 +755,7 @@ class Task:
                         self.image,
                         args.cache,
                         args.inventory,
-                        *runqemu_kwargs.values(),
+                        runqemu_kwargs,
                     )
                     try:
                         runqemu.runqemu(
