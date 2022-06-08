@@ -44,10 +44,6 @@ COMMENT_CMD_TEST_PENDING = "[citest pending]"
 COMMENT_CMD_TEST_BAD = "[citest bad]"
 COMMENT_CMD_TEST_SKIP = "[citest skip]"
 
-KVM_BACKEND = "kvm"
-CITOOL_BACKEND = "citool"
-CITOOL_COMMAND = "/entrypoint.sh"
-
 # https://www.freedesktop.org/wiki/CommonExtendedAttributes/
 URL_XATTR = "user.xdg.origin.url"
 DATE_XATTR = "user.dublincore.date"
@@ -525,9 +521,9 @@ class Task:
         self,
         role,
         playbooks,
-        collection_dest_path,
+        batch_dir,
         erase_old_snapshot,
-        sourcedir,
+        artifactsdir,
     ):
         """
         Generate a batch file to pass to runqemu with the --batch-file
@@ -547,26 +543,30 @@ class Task:
             pre_playbooks = ""
             post_playbooks = ""
 
-        # batch_file = "{}/{}_batch.txt".format(sourcedir, role)
-        batch_file = "{}_batch.txt".format(role)
+        batch_file = "{}/{}_batch.txt".format(batch_dir, role)
+        logging.info("batch file %s", batch_file)
+        erase_old_snapshot_str = "--erase-old-snapshot" if erase_old_snapshot else ""
         with open(batch_file, "w") as batchf:
             for playbook in playbooks:
-                line = "--tests-dir {} {} -- {} {} {}\n".format(
+                log_file = self._ansible_log_filename(playbook, artifactsdir)
+                line_fmt = "--tests-dir {} --log-file {} --batch-id {} {} -- {} {} {}\n"
+                line = line_fmt.format(
                     test_dir,
-                    "--erase-old-snapshot" if erase_old_snapshot else "",
+                    log_file,
+                    playbook,
+                    erase_old_snapshot_str,
                     pre_playbooks,
                     playbook,
                     post_playbooks,
                 )
                 logging.debug("batch_file: %s", line)
                 batchf.write(line)
-                erase_old_snapshot = False
+                erase_old_snapshot_str = ""
         return batch_file
 
     def _print_test_result(self, test_passed, ansible_log, artifactsdir):
         """
         Prints the test result based on the test_passed argument.
-        Shared between CITOOL_BACKEND and KVM_BACKEND.
         """
         run_status = True
         if not test_passed:
@@ -582,10 +582,13 @@ class Task:
             print("SUCCESS")
         return run_status
 
+    def _ansible_log_filename(self, playbook, artifactsdir):
+        basename = os.path.basename(playbook)
+        return os.path.join(artifactsdir, basename + ".log")
+
     def run(
         self,
         artifactsdir,
-        private_artifactsdir,
         args,
     ):
         """
@@ -676,14 +679,12 @@ class Task:
                     if not os.path.exists(setup_snapshot):
                         setup_snapshot = None
 
-            ansible_log = f"{artifactsdir}/ansible.log"
-            if args.backend == CITOOL_BACKEND:
-                output_log = f"{private_artifactsdir}/citool.log"
-            elif args.backend == KVM_BACKEND:
-                output_log = ansible_log
-            else:
-                assert False, "unreachable"
-
+            fmtstr = (
+                "Calling runqemu with image %s "
+                "cache %s "
+                "inventory %s "
+                "runqemu_args %s"
+            )
             for pset in _playbook_set:
                 src_filter_plugin_path = os.path.join(sourcedir, "filter_plugins")
                 dest_filter_plugin_path = os.path.join(sourcedir, "hide_filter_plugins")
@@ -694,289 +695,113 @@ class Task:
                     if os.path.isdir(src_filter_plugin_path):
                         os.rename(src_filter_plugin_path, dest_filter_plugin_path)
 
-                if args.backend == CITOOL_BACKEND:
-                    for playbook in sorted(pset["playbooks"]):
-                        print(f"Testing {playbook}...", end="")
-                        test_passed = False
-                        with redirect_output(output_log, mode="a"):
-                            # Use the qcow2 inventory from standard-test-roles, which
-                            # boots a transient VM and runs the playbook against that.
-                            # Create a fresh instance for each test playbook. However,
-                            # we do need to run the setup (if it exists) in the same
-                            # invocation of ansible-playbook, so that that it applies
-                            # to the same VM as the test playbook.
+                test_passed = False
 
-                            testenv = self.image.get("env", {})
-                            if need_collections_paths or pset["is_collection"]:
-                                envname = "ANSIBLE_COLLECTIONS_PATHS"
-                                testenv[envname] = collection_dest_path
-                            setup_file = self.image["setup"]
-                            result = run(
-                                CITOOL_COMMAND,
-                                "-o",
-                                f"{private_artifactsdir}/citool-debug.log",
-                                "ansible",
-                                "rules-engine",
-                                "guest-setup",
-                                "--playbooks",
-                                setup_file,  # revisit this if we ever support citool
-                                "guess-environment",
-                                "--image-method=force",
-                                "--image",
-                                self.image["openstack_image"],
-                                "--distro-method=force",
-                                "--distro",
-                                self.image["openstack_image"],
-                                "--compose-method=force",
-                                "--compose",
-                                self.image["openstack_image"],
-                                "openstack",
-                                "test-scheduler-sti",
-                                "--playbook",
-                                playbook,
-                                "test-scheduler",
-                                "test-schedule-runner-sti",
-                                "test-schedule-runner",
-                                "test-schedule-report",
-                                env=testenv,
-                                check=False,
-                                cwd=os.path.dirname(playbook),
-                            )
-                            if result.resultcode == 0:
-                                test_passed = True
-
-                        ptrn = re.compile(
-                            f"{playbook}] Ansible logs are in (.+/ansible-output.txt)"
-                        )
-                        # parse the ansible output file location from citool-debug.log
-                        ansible_output = ""
-                        with open(
-                            f"{private_artifactsdir}/citool-debug.log"
-                        ) as citooldbg:
-                            for line in citooldbg:
-                                mtch = ptrn.search(line)
-                                if mtch:
-                                    ansible_output = mtch.group(1)
-                                    break
-                        # ansible_output is relative to /WORKDIR
-                        if ansible_output:
-                            # filter out garbage in ansible_output
-                            with open(f"/WORKDIR/{ansible_output}") as inf:
-                                with open(ansible_log, "w") as outf:
-                                    docopy = False
-                                    for line in inf:
-                                        if line.startswith("---v---v---v---v---v---"):
-                                            docopy = True
-                                        elif line.startswith("---^---^---^---^---^---"):
-                                            break
-                                        elif docopy:
-                                            outf.write(line)
-                        else:
-                            logging.error(
-                                "ERROR: Could not find location of ansible output "
-                                "in citool-debug.log"
-                            )
-                            print("FAILURE")
-                            return False
-
-                    run_status = self._print_test_result(
-                        test_passed, ansible_log, artifactsdir
+                # Use the qcow2 inventory from standard-test-roles, which
+                # boots a transient VM and runs the playbook against that.
+                # Create a fresh instance for each test playbook. However,
+                # we do need to run the setup (if it exists) in the same
+                # invocation of ansible-playbook, so that that it applies
+                # to the same VM as the test playbook.
+                runqemu_kwargs = dict(
+                    ansible_args=None,
+                    collection_path=collection_dest_path,
+                    pretty=False,
+                    profile=False,
+                    sourcedir=sourcedir,
+                    artifacts=artifactsdir,
+                    setup_yml=[setup_snapshot] if setup_snapshot is not None else None,
+                    use_snapshot=args.use_snapshot,
+                    remove_cloud_init=args.remove_cloud_init,
+                    use_yum_cache=args.use_yum_cache,
+                    wait_on_qemu=False,
+                    post_snap_sleep_time=args.post_snap_sleep_time,
+                    batch_file=None,
+                    batch_report=None,
+                )
+                use_batch = self.repo not in NO_BATCH
+                run_playbooks = sorted(pset["playbooks"])
+                if use_batch:
+                    batch_dir = tempfile.mkdtemp()
+                    batch_file = self._gen_batch_file(
+                        self.repo,
+                        run_playbooks,
+                        batch_dir,
+                        erase_old_snapshot,
+                        artifactsdir,
                     )
-                    if run_status is None or (
-                        not run_status and not args.run_all_tests
-                    ):
-                        if need_collections_paths and not args.keep_results:
-                            cleanup_collection_tempdirs(remove_script=False)
-                        return run_status
-
-                if args.backend == KVM_BACKEND:
+                    runqemu_kwargs["batch_file"] = batch_file
+                    batch_report = "{}.report".format(os.path.splitext(batch_file)[0])
+                    runqemu_kwargs["batch_report"] = batch_report
+                if "runqemu_args" in self.image:
+                    runqemu_kwargs.update(self.image["runqemu_args"])
+                for playbook in run_playbooks:
                     test_passed = False
-
-                    with redirect_output(output_log, mode="a"):
-                        # Use the qcow2 inventory from standard-test-roles, which
-                        # boots a transient VM and runs the playbook against that.
-                        # Create a fresh instance for each test playbook. However,
-                        # we do need to run the setup (if it exists) in the same
-                        # invocation of ansible-playbook, so that that it applies
-                        # to the same VM as the test playbook.
-                        runqemu_kwargs = dict(
-                            ansible_args=None,
-                            collection_path=collection_dest_path,
-                            pretty=False,
-                            profile=False,
-                            sourcedir=sourcedir,
-                            artifacts=artifactsdir,
-                            setup_yml=[setup_snapshot]
-                            if setup_snapshot is not None
-                            else None,
-                            use_snapshot=args.use_snapshot,
-                            remove_cloud_init=args.remove_cloud_init,
-                            use_yum_cache=args.use_yum_cache,
-                            wait_on_qemu=False,
-                            erase_old_snapshot=None,
-                            post_snap_sleep_time=args.post_snap_sleep_time,
-                            batch_file=None,
-                            batch_report=None,
+                    ansible_args = [f"--skip-tags={args.skip_tags}"]
+                    runqemu_kwargs["ansible_args"] = ansible_args
+                    if args.debug:
+                        ansible_args.append("-vv")
+                    if use_batch:
+                        ansible_args.append("--")
+                        log_file = None
+                    else:
+                        print(f"Testing {playbook}...", end="")
+                        ansible_args.extend(["--", playbook])
+                        log_file = self._ansible_log_filename(playbook, artifactsdir)
+                        runqemu_kwargs["log_file"] = log_file
+                        runqemu_kwargs["erase_old_snapshot"] = erase_old_snapshot
+                    logging.debug(
+                        fmtstr,
+                        self.image,
+                        args.cache,
+                        args.inventory,
+                        runqemu_kwargs,
+                    )
+                    try:
+                        runqemu.runqemu(
+                            self.image,
+                            args.cache,
+                            args.inventory,
+                            **runqemu_kwargs,
                         )
-
-                        if self.repo in NO_BATCH:
-                            runqemu_kwargs["erase_old_snapshot"] = erase_old_snapshot
-                            if "runqemu_args" in self.image:
-                                runqemu_kwargs.update(self.image["runqemu_args"])
-                            for playbook in sorted(pset["playbooks"]):
-                                print(f"Testing {playbook}...", end="")
-                                test_passed = False
-                                ansible_args = [f"--skip-tags={args.skip_tags}"]
-                                if args.debug:
-                                    ansible_args.append("-vv")
-                                ansible_args.extend(["--", playbook])
-                                runqemu_kwargs["ansible_args"] = ansible_args
-                                fmtstr = (
-                                    "Calling runqemu with image %s "
-                                    "cache %s "
-                                    "inventory %s "
-                                    "args %s "
-                                    "collection_path %s "
-                                    "pretty %s "
-                                    "profile %s "
-                                    "sourcedir %s "
-                                    "artifacts %s "
-                                    "setup_yml %s "
-                                    "use_snapshot %s "
-                                    "remove_cloud_init %s "
-                                    "use_yum_cache %s "
-                                    "wait_on_qemu %s "
-                                    "erase_old_snapshot %s "
-                                    "post_snap_sleep_time %s "
-                                    "batch_file %s "
-                                    "batch_report %s"
-                                )
-                                logging.debug(
-                                    fmtstr,
-                                    self.image,
-                                    args.cache,
-                                    args.inventory,
-                                    *runqemu_kwargs.values(),
-                                )
-
-                                logging.debug(
-                                    "Running playbook [%s] directory [%s] "
-                                    "is present [%s] cwd [%s]",
-                                    playbook,
-                                    collection_dest_path,
-                                    str(os.path.isdir(collection_dest_path)),
-                                    os.path.dirname(playbook),
-                                )
-                                try:
-                                    runqemu.runqemu(
-                                        self.image,
-                                        args.cache,
-                                        args.inventory,
-                                        **runqemu_kwargs,
-                                    )
-                                    test_passed = True
-                                except Exception as exc:
-                                    logging.debug(
-                                        "Test %s failed with %s", playbook, str(exc)
-                                    )
-                                erase_old_snapshot = (
-                                    False  # only erase first time through loop
-                                )
-
-                                run_status = self._print_test_result(
-                                    test_passed, ansible_log, artifactsdir
-                                )
-                                if run_status is None or (
-                                    not run_status and not args.run_all_tests
-                                ):
-                                    if need_collections_paths and not args.keep_results:
-                                        cleanup_collection_tempdirs(remove_script=False)
-                                    return run_status
-
+                        test_passed = True
+                    except Exception as exc:
+                        if use_batch:
+                            logging.debug("Batch test failed with %s", str(exc))
                         else:
-                            ansible_args = [f"--skip-tags={args.skip_tags}"]
-                            if args.debug:
-                                ansible_args.append("-vv")
-                            ansible_args.extend(["--"])
-                            runqemu_kwargs["ansible_args"] = ansible_args
-                            batch_file = self._gen_batch_file(
-                                self.repo,
-                                sorted(pset["playbooks"]),
-                                collection_dest_path,
-                                erase_old_snapshot,
-                                sourcedir,
-                            )
-                            runqemu_kwargs["batch_file"] = batch_file
-                            batch_report = "{}.report".format(
-                                os.path.splitext(batch_file)[0]
-                            )
-                            runqemu_kwargs["batch_report"] = batch_report
-                            if "runqemu_args" in self.image:
-                                runqemu_kwargs.update(self.image["runqemu_args"])
-                            fmtstr = (
-                                "Calling runqemu with image %s "
-                                "cache %s "
-                                "inventory %s "
-                                "args %s "
-                                "collection_path %s "
-                                "pretty %s "
-                                "profile %s "
-                                "sourcedir %s "
-                                "artifacts %s "
-                                "setup_yml %s "
-                                "use_snapshot %s "
-                                "remove_cloud_init %s "
-                                "use_yum_cache %s "
-                                "wait_on_qemu %s "
-                                "erase_old_snapshot %s "
-                                "post_snap_sleep_time %s "
-                                "batch_file %s "
-                                "batch_report %s"
-                            )
-                            logging.debug(
-                                fmtstr,
-                                self.image,
-                                args.cache,
-                                args.inventory,
-                                *runqemu_kwargs.values(),
-                            )
-                            try:
-                                runqemu.runqemu(
-                                    self.image,
-                                    args.cache,
-                                    args.inventory,
-                                    **runqemu_kwargs,
+                            logging.debug("Test %s failed with %s", playbook, str(exc))
+                    erase_old_snapshot = False  # only erase first time through loop
+                    if use_batch:
+                        run_statuses = []
+                        with open(batch_report) as reports:
+                            for report in reports:
+                                ary = report.split()
+                                _result = ary[0] == "0"
+                                _playbook = ary[3]
+                                _ansible_log = self._ansible_log_filename(
+                                    _playbook, artifactsdir
                                 )
-                                test_passed = True
-                            except Exception as exc:
-                                logging.debug(
-                                    "Test %s failed with %s", self.repo, str(exc)
-                                )
-                            finally:
-                                with open(batch_report) as reports:
-                                    for report in reports:
-                                        for r in report.split():
-                                            if r.isdigit():
-                                                _result = (
-                                                    "SUCCESS" if r == "0" else "FAILURE"
-                                                )
-                                            elif not re.search(
-                                                "setup-snapshot.yml|_backup.yml|_restore.yml",  # noqa
-                                                r,
-                                            ):
-                                                _playbook = r
-                                        print(
-                                            "Testing {}...{}".format(_playbook, _result)
-                                        )
+                                print(f"Testing {_playbook}...", end="")
                                 run_status = self._print_test_result(
-                                    test_passed, ansible_log, artifactsdir
+                                    _result, _ansible_log, artifactsdir
                                 )
-                                if run_status is None or (
-                                    not run_status and not args.run_all_tests
-                                ):
-                                    if need_collections_paths and not args.keep_results:
-                                        cleanup_collection_tempdirs(remove_script=False)
-                                    return run_status
+                                run_statuses.append(run_status)
+                        shutil.rmtree(batch_dir)
+                        if all(run_statuses):
+                            run_status = True
+                        elif None in run_statuses:
+                            run_status = None
+                        else:
+                            run_status = False
+                        break
+                    else:
+                        run_status = self._print_test_result(
+                            test_passed, log_file, artifactsdir
+                        )
+                        if run_status is None or (
+                            not run_status and not args.run_all_tests
+                        ):
+                            break
 
                 if pset["is_collection"]:
                     if os.path.isdir(dest_filter_plugin_path):
@@ -1228,25 +1053,30 @@ def scp(source, destination, secrets):
 
 def make_html(source_file):
     """Create simple html file with navigation links from test.log"""
-    links = {"index": ".", "ansible log": "ansible.log"}
     html_file = source_file + ".html"
 
-    anchors = ""
-    for name, target in links.items():
-        a_html = "<a href='{}'>{}</a> ".format(html.escape(target), html.escape(name))
-        anchors += a_html
-
+    in_preamble = True
     with open(source_file) as ifile:
-        textdata = ifile.read()
-
-    html_code = """<pre>{}</pre>
-{}
-    """.format(
-        html.escape(textdata), anchors
-    )
-
-    with open(html_file, "w") as ofile:
-        ofile.write(html_code)
+        with open(html_file, "w") as ofile:
+            ofile.write("<pre>\n")
+            for ll in ifile:
+                if ll.startswith("Testing"):
+                    if in_preamble:
+                        ofile.write("</pre>\n")
+                        in_preamble = False
+                    ary = ll.split("...")
+                    ary2 = ary[0].split()
+                    basename = os.path.basename(ary2[1])
+                    outstr = "<p>{} <a href='{}.log'>{}</a>...{}\n".format(
+                        html.escape(ary2[0]),
+                        html.escape(basename),
+                        html.escape(ary2[1]),
+                        html.escape(ary[1]),
+                    )
+                    ofile.write(outstr)
+                else:
+                    ofile.write(html.escape(ll))
+            ofile.write("<p><a href='.'>index</a>\n")
 
     return html_file
 
@@ -1340,14 +1170,14 @@ def handle_task(gh, args, config, task, ansible_id):
         private_artifactsdir = f"{private_workdir}/artifacts"
         os.makedirs(private_artifactsdir)
 
-        with redirect_output(f"{artifactsdir}/test.log"):
+        local_test_log = f"{artifactsdir}/test.log"
+        with redirect_output(local_test_log):
             print(title)
             print(len(title) * "=")
             print()
             try:
                 result = task.run(
                     artifactsdir,
-                    private_artifactsdir,
                     args,
                 )
                 logging.debug(f"task result {result} for {artifactsdir}")
@@ -1378,8 +1208,6 @@ def handle_task(gh, args, config, task, ansible_id):
                 logging.error(description)
 
         run("chmod", "a+rX", workdir)
-
-        local_test_log = f"{artifactsdir}/test.log"
 
         if dry_run and task.is_pr():
             logging.info(
@@ -1460,21 +1288,9 @@ def check_environment(args):
     Check whether the environment is sane.
     Intent here is to fail early for example if /dev/kvm is not available.
     """
-    if args.backend == KVM_BACKEND:
-        if not os.access("/dev/kvm", os.R_OK | os.W_OK):
-            logging.critical("test-harness needs access to /dev/kvm, aborting")
-            sys.exit(1)
-
-    elif args.backend == CITOOL_BACKEND:
-        try:
-            run(CITOOL_COMMAND, "-V", "-o", "/tmp/citool-debug.log")
-            run("ansible", "--version")
-        except Exception:
-            logging.critical(
-                f"test-harness needs installed citool command {CITOOL_COMMAND}, "
-                "aborting"
-            )
-            sys.exit(1)
+    if not os.access("/dev/kvm", os.R_OK | os.W_OK):
+        logging.critical("test-harness needs access to /dev/kvm, aborting")
+        sys.exit(1)
 
 
 def setup_logging(config_logging, args):
@@ -1634,12 +1450,6 @@ def main():
         ),
     )
     parser.add_argument(
-        "--backend",
-        default=os.environ.get("TEST_HARNESS_BACKEND", KVM_BACKEND),
-        choices=[KVM_BACKEND, CITOOL_BACKEND],
-        help="Backend for testing",
-    )
-    parser.add_argument(
         "--collections",
         default=bool(strtobool(os.environ.get("TEST_HARNESS_COLLECTIONS", "False"))),
         action="store_true",
@@ -1763,14 +1573,6 @@ def main():
                     "of Ansible used by the test."
                 )
                 del test_images[image["name"]]
-            continue
-
-        if not image.get("openstack_image") and args.backend == CITOOL_BACKEND:
-            logging.debug(
-                f"Image {image['name']} will not be used for testing because it is not "
-                "supported in Citool backend."
-            )
-            del test_images[image["name"]]
             continue
 
         keep_image = False
