@@ -549,7 +549,8 @@ class Task:
         with open(batch_file, "w") as batchf:
             for playbook in playbooks:
                 log_file = self._ansible_log_filename(playbook, artifactsdir)
-                line = "--tests-dir {} --log-file {} --batch-id {} {} -- {} {} {}\n".format(
+                line_fmt = "--tests-dir {} --log-file {} --batch-id {} {} -- {} {} {}\n"
+                line = line_fmt.format(
                     test_dir,
                     log_file,
                     playbook,
