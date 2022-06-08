@@ -722,9 +722,7 @@ class Task:
                     profile=False,
                     sourcedir=sourcedir,
                     artifacts=artifactsdir,
-                    setup_yml=[setup_snapshot]
-                    if setup_snapshot is not None
-                    else None,
+                    setup_yml=[setup_snapshot] if setup_snapshot is not None else None,
                     use_snapshot=args.use_snapshot,
                     remove_cloud_init=args.remove_cloud_init,
                     use_yum_cache=args.use_yum_cache,
@@ -745,9 +743,7 @@ class Task:
                         artifactsdir,
                     )
                     runqemu_kwargs["batch_file"] = batch_file
-                    batch_report = "{}.report".format(
-                        os.path.splitext(batch_file)[0]
-                    )
+                    batch_report = "{}.report".format(os.path.splitext(batch_file)[0])
                     runqemu_kwargs["batch_report"] = batch_report
                 if "runqemu_args" in self.image:
                     runqemu_kwargs.update(self.image["runqemu_args"])
@@ -783,24 +779,24 @@ class Task:
                         test_passed = True
                     except Exception as exc:
                         if use_batch:
-                            logging.debug(
-                                "Batch test failed with %s", str(exc)
-                            )
+                            logging.debug("Batch test failed with %s", str(exc))
                         else:
-                            logging.debug(
-                                "Test %s failed with %s", playbook, str(exc)
-                            )
-                    erase_old_snapshot = (
-                        False  # only erase first time through loop
-                    )
+                            logging.debug("Test %s failed with %s", playbook, str(exc))
+                    erase_old_snapshot = False  # only erase first time through loop
                     if use_batch:
                         run_statuses = []
                         with open(batch_report) as reports:
                             for report in reports:
                                 ary = report.split()
                                 _result = ary[0] == "0"
-                                _playbook = [_pb for _pb in ary[2:] if os.path.basename(_pb).startswith("tests_")][0]
-                                _ansible_log = self._ansible_log_filename(_playbook, artifactsdir)
+                                _playbook = [
+                                    _pb
+                                    for _pb in ary[2:]
+                                    if os.path.basename(_pb).startswith("tests_")
+                                ][0]
+                                _ansible_log = self._ansible_log_filename(
+                                    _playbook, artifactsdir
+                                )
                                 print(f"Testing {_playbook}...", end="")
                                 run_status = self._print_test_result(
                                     _result, _ansible_log, artifactsdir
