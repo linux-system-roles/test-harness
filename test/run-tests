@@ -140,6 +140,23 @@ def handle_transient_httperrors(error):
             logging.warning("%s", msg)
             time.sleep(timeout)
             return True
+        elif "exceeded a secondary rate limit" in github_msg:
+            timeout = transient_error_wait_time.next()
+            msg = "We have hit the secondary rate limit, waiting {} s...".format(
+                timeout
+            )
+            logging.warning("%s", msg)
+            time.sleep(timeout)
+            return True
+        else:
+            # don't know what this is - print everything we have
+            import pprint
+
+            logging.error(
+                "status_code [%d] headers\n%s\n",
+                error.response.status_code,
+                pprint.pformat(dict(error.response.headers)),
+            )
 
         return False
 
@@ -773,19 +790,22 @@ class Task:
                     erase_old_snapshot = False  # only erase first time through loop
                     if use_batch:
                         run_statuses = []
-                        with open(batch_report) as reports:
-                            for report in reports:
-                                ary = report.split()
-                                _result = ary[0] == "0"
-                                _playbook = ary[3]
-                                _ansible_log = self._ansible_log_filename(
-                                    _playbook, artifactsdir
-                                )
-                                print(f"Testing {_playbook}...", end="")
-                                run_status = self._print_test_result(
-                                    _result, _ansible_log, artifactsdir
-                                )
-                                run_statuses.append(run_status)
+                        if os.path.exists(batch_report):
+                            with open(batch_report) as reports:
+                                for report in reports:
+                                    ary = report.split()
+                                    _result = ary[0] == "0"
+                                    _playbook = ary[3]
+                                    _ansible_log = self._ansible_log_filename(
+                                        _playbook, artifactsdir
+                                    )
+                                    print(f"Testing {_playbook}...", end="")
+                                    run_status = self._print_test_result(
+                                        _result, _ansible_log, artifactsdir
+                                    )
+                                    run_statuses.append(run_status)
+                        else:
+                            run_statuses.append(False)
                         shutil.rmtree(batch_dir)
                         if all(run_statuses):
                             run_status = True
