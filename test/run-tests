@@ -140,6 +140,14 @@ def handle_transient_httperrors(error):
             logging.warning("%s", msg)
             time.sleep(timeout)
             return True
+        elif "exceeded a secondary rate limit" in github_msg:
+            timeout = transient_error_wait_time.next()
+            msg = "We have hit the secondary rate limit, waiting {} s...".format(
+                timeout
+            )
+            logging.warning("%s", msg)
+            time.sleep(timeout)
+            return True
         else:
             # don't know what this is - print everything we have
             import pprint
