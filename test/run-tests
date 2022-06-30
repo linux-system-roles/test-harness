@@ -58,7 +58,8 @@ ROLE_MODIFIED_FILES = {
 #           causes a cascade
 # timesync - fails to switch provider when the managed host is RHEL-6
 # vpn - no proper cleanup
-NO_BATCH = ["storage", "timesync", "vpn"]
+# mssql - no proper cleanup
+NO_BATCH = ["storage", "timesync", "vpn", "mssql"]
 
 
 class TransientErrorWaitTime:
