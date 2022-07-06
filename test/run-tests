@@ -740,6 +740,7 @@ class Task:
                     post_snap_sleep_time=args.post_snap_sleep_time,
                     batch_file=None,
                     batch_report=None,
+                    collection=pset["is_collection"],
                 )
                 use_batch = self.repo not in NO_BATCH
                 run_playbooks = sorted(pset["playbooks"])
